@@ -20,8 +20,8 @@ const NONE: usize = usize::MAX;
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_64: i64 = 0x7fff_ffff_ffff_ffff;
-const MAX_32: i64 = 0x7fff_ffff;
+const MAX_64: i64 = i64::MAX;
+const MAX_32: i64 = i32::MAX as i64;
 
 const WHITE: i64 = 0;
 const GREY: i64 = 1;
