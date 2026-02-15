@@ -24,6 +24,11 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 2
+
 [profile.bench]
 inherits = "release"
 debug = 2

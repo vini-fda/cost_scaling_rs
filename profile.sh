@@ -43,13 +43,9 @@ if ! command -v samply &>/dev/null; then
     exit 1
 fi
 
-# Build with debug symbols (required for symbol resolution)
-echo "==> Building release binary with debug symbols..."
-CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 cargo build --release --quiet
-
-# Generate dSYM (required on macOS for samply symbol resolution)
-echo "==> Generating dSYM..."
-dsymutil target/release/cost-scaling-rs 2>/dev/null || true
+# Build with debug symbols using the 'profiling' profile (inherits release, but unstripped)
+echo "==> Building with profiling profile..."
+cargo build --profile profiling --quiet
 
 # Generate test data if missing
 DATA_DIR="target/benchdata"
@@ -74,7 +70,7 @@ echo ""
 
 samply record --iteration-count "$ITERATIONS" \
     ${SAMPLY_ARGS[@]+"${SAMPLY_ARGS[@]}"} \
-    target/release/cost-scaling-rs "$PROBLEM"
+    target/profiling/cost-scaling-rs "$PROBLEM"
 
 if [[ ${#SAMPLY_ARGS[@]} -gt 0 && " ${SAMPLY_ARGS[*]} " == *" --save-only "* ]]; then
     echo ""
