@@ -83,9 +83,9 @@ echo "==> Profiling $ITERATIONS iterations of $(basename "$PROBLEM")..."
 echo "    (Each run takes ~300ms, total ~$((ITERATIONS * 300 / 1000))s)"
 echo ""
 
-samply record "${SAMPLY_ARGS[@]}" "$WRAPPER"
+samply record ${SAMPLY_ARGS[@]+"${SAMPLY_ARGS[@]}"} "$WRAPPER"
 
-if [[ " ${SAMPLY_ARGS[*]} " == *" --save-only "* ]]; then
+if [[ ${#SAMPLY_ARGS[@]} -gt 0 && " ${SAMPLY_ARGS[*]} " == *" --save-only "* ]]; then
     echo ""
     echo "==> Profile saved to profile.json"
     echo "    View at: https://profiler.firefox.com/ (click Load...)"
