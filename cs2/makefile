@@ -7,7 +7,8 @@
 # CHECK_SOLUTION check feasibility/optimality. HIGH OVERHEAD!
 
 # change these to suit your system
-CCOMP = g++
+CCOMP = gcc
+#CCOMP = g++
 #CCOMP = gcc-4
 #CFLAGS = -O4 -DNDEBUG
 #CFLAGS = -g -DCHECK_SOLUTION -Wall
