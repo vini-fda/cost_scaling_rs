@@ -970,6 +970,18 @@ impl McmfCs2 {
         self.excq_last = NONE;
     }
 
+    /// Scans node `i` during a price update, propagating distance labels
+    /// to neighboring nodes via reverse residual arcs.
+    ///
+    /// For each neighbor `j` reachable through a reverse arc with positive
+    /// residual capacity, computes a candidate rank from the reduced cost
+    /// `rc = p_j + c_ji - p_i`. If `rc < 0` the arc is admissible and `j`
+    /// inherits `i`'s rank; otherwise the rank increases by `ceil(rc / epsilon)`.
+    /// When a neighbor's rank improves, it is moved to a closer bucket in the
+    /// Dijkstra-like scan order used by [`price_update`](Self::price_update).
+    ///
+    /// After processing all neighbors, node `i`'s price is decreased by
+    /// `rank * epsilon` and its rank is set to −1 (settled).
     fn up_node_scan(&mut self, i: NodeIndex) {
         self.n_scan += 1;
         let i_rank = self.nodes[i].rank;
