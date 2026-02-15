@@ -13,8 +13,7 @@ CS2 solves the [minimum-cost flow problem](https://en.wikipedia.org/wiki/Minimum
 ```rust
 use cost_scaling_rs::McmfCs2;
 
-let input = std::fs::read_to_string("problem.min").unwrap();
-let solver = McmfCs2::from_dimacs(&input).unwrap();
+let solver = McmfCs2::from_dimacs_file("problem.min").unwrap();
 let solution = solver.min_cost(false, false).unwrap();
 println!("Optimal cost: {}", solution.objective_cost);
 ```
