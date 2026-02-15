@@ -53,8 +53,19 @@ const MAX_CYCLES_CANCELLED: i32 = 0;
 const START_CYCLE_CANCEL: u64 = 100;
 
 // ---------------------------------------------------------------------------
-// Structs
+// Data types
 // ---------------------------------------------------------------------------
+
+/// Node coloring for DFS traversal
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Color {
+    /// Undiscovered node
+    White,
+    /// Node is on the current DFS stack (in progress)
+    Grey,
+    /// All outgoing arcs have been fully explored.
+    Black,
+}
 
 /// A node in the min-cost flow network.
 #[derive(Clone)]
@@ -77,8 +88,8 @@ struct Node {
     b_prev: NodeIndex,
     /// Bucket number.
     rank: i64,
-    /// Auxiliary field.
-    inp: i64,
+    /// DFS visit color (White/Grey/Black) used in price_refine and compute_prices.
+    inp: Color,
 }
 
 /// An arc in the min-cost flow network.
@@ -254,7 +265,7 @@ impl Default for Node {
             b_next: NONE,
             b_prev: NONE,
             rank: 0,
-            inp: 0,
+            inp: Color::White,
         }
     }
 }
@@ -1239,13 +1250,13 @@ impl McmfCs2 {
             let mut nnc: i32 = 0;
             for i in 0..self.sentinel_node {
                 self.nodes[i].rank = 0;
-                self.nodes[i].inp = WHITE;
+                self.nodes[i].inp = Color::White;
                 self.nodes[i].current = self.nodes[i].first;
             }
             self.reset_stackq();
 
             for root in 0..self.sentinel_node {
-                if self.nodes[root].inp == BLACK {
+                if self.nodes[root].inp == Color::Black {
                     continue;
                 }
                 self.nodes[root].b_next = NONE;
@@ -1253,7 +1264,7 @@ impl McmfCs2 {
 
                 // depth first search
                 'dfs: loop {
-                    self.nodes[i].inp = GREY;
+                    self.nodes[i].inp = Color::Grey;
                     let mut a = self.nodes[i].current;
                     let a_stop = self.nodes[i + 1].suspended;
                     let mut stepped = false;
@@ -1263,7 +1274,7 @@ impl McmfCs2 {
                             let j = self.arcs[a].head;
                             let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                             if rc < 0 {
-                                if self.nodes[j].inp == WHITE {
+                                if self.nodes[j].inp == Color::White {
                                     // step forward
                                     self.nodes[i].current = a;
                                     self.nodes[j].b_next = i;
@@ -1271,7 +1282,7 @@ impl McmfCs2 {
                                     stepped = true;
                                     break;
                                 }
-                                if self.nodes[j].inp == GREY {
+                                if self.nodes[j].inp == Color::Grey {
                                     // cycle detected
                                     cc = 0;
                                     nnc += 1;
@@ -1308,7 +1319,7 @@ impl McmfCs2 {
                                     if is != i {
                                         ir = i;
                                         while ir != is {
-                                            self.nodes[ir].inp = WHITE;
+                                            self.nodes[ir].inp = Color::White;
                                             ir = self.nodes[ir].b_next;
                                         }
                                         i = is;
@@ -1327,7 +1338,7 @@ impl McmfCs2 {
                     }
 
                     // step back
-                    self.nodes[i].inp = BLACK;
+                    self.nodes[i].inp = Color::Black;
                     self.n_prscan1 += 1;
                     let j = self.nodes[i].b_next;
                     self.stackq_push(i);
@@ -1466,20 +1477,20 @@ impl McmfCs2 {
         loop {
             for i in 0..self.sentinel_node {
                 self.nodes[i].rank = 0;
-                self.nodes[i].inp = WHITE;
+                self.nodes[i].inp = Color::White;
                 self.nodes[i].current = self.nodes[i].first;
             }
             self.reset_stackq();
 
             for root in 0..self.sentinel_node {
-                if self.nodes[root].inp == BLACK {
+                if self.nodes[root].inp == Color::Black {
                     continue;
                 }
                 self.nodes[root].b_next = NONE;
                 let mut i = root;
 
                 'dfs: loop {
-                    self.nodes[i].inp = GREY;
+                    self.nodes[i].inp = Color::Grey;
                     let mut a = self.nodes[i].suspended;
                     let a_stop = self.nodes[i + 1].suspended;
                     let mut stepped = false;
@@ -1489,14 +1500,14 @@ impl McmfCs2 {
                             let j = self.arcs[a].head;
                             let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                             if rc < 0 {
-                                if self.nodes[j].inp == WHITE {
+                                if self.nodes[j].inp == Color::White {
                                     self.nodes[i].current = a;
                                     self.nodes[j].b_next = i;
                                     i = j;
                                     stepped = true;
                                     break;
                                 }
-                                if self.nodes[j].inp == GREY {
+                                if self.nodes[j].inp == Color::Grey {
                                     cc = 0;
                                 }
                             }
@@ -1508,7 +1519,7 @@ impl McmfCs2 {
                         continue 'dfs;
                     }
 
-                    self.nodes[i].inp = BLACK;
+                    self.nodes[i].inp = Color::Black;
                     self.n_prscan1 += 1;
                     let j = self.nodes[i].b_next;
                     self.stackq_push(i);
