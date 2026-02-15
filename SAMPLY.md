@@ -14,7 +14,7 @@ cargo install --locked samply
 ./profile.sh
 ```
 
-This builds the binary with debug symbols, generates test data if needed, runs 20 iterations of the 10k-node problem, and opens the Firefox Profiler in your browser.
+This builds the binary using the `profiling` cargo profile (release optimizations with debug symbols, no stripping), generates test data if needed, runs 20 iterations of the 10k-node problem, and opens the Firefox Profiler in your browser.
 
 ## Options
 
@@ -41,6 +41,13 @@ In the Firefox Profiler UI:
 
 ## Troubleshooting
 
-- **Empty symbols / `[unknown]` in profile**: Make sure the binary was built with `CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2`. The script handles this automatically.
+- **Empty symbols / `[unknown]` in profile**: The script builds with `--profile profiling` (defined in `Cargo.toml`), which keeps debug symbols and disables stripping. If symbols are still missing on macOS, generate a dSYM bundle manually:
+  ```bash
+  dsymutil target/profiling/cost-scaling-rs
+  ```
+  You can also resolve addresses after the fact with `atos`:
+  ```bash
+  atos -o target/profiling/cost-scaling-rs -l 0x100000000 <address>
+  ```
 - **Too few samples**: Increase `--iterations` or use a larger problem size. Each sample is taken every ~1ms, so a 300ms run only gets ~300 samples.
-- **macOS permission errors**: samply uses the `DTrace` system. If blocked, try running with `sudo` or check System Preferences > Privacy & Security > Developer Tools.
+- **macOS permission errors**: samply cannot profile system-signed binaries (e.g. `/usr/bin/bash`). The script profiles the Rust binary directly to avoid this. If you still get permission errors, try running with `sudo` or check System Preferences > Privacy & Security > Developer Tools.
