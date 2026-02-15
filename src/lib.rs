@@ -1478,7 +1478,9 @@ impl McmfCs2 {
 
     fn compute_prices(&mut self) {
         self.n_prefine += 1;
-        let mut cc: i32 = 1;
+        // Whether the graph is cycle free
+        // (expected for a correct, finished solution).
+        let mut cycle_free = true;
 
         loop {
             for i in 0..self.sentinel_node {
@@ -1514,7 +1516,7 @@ impl McmfCs2 {
                                     break;
                                 }
                                 if self.nodes[j].inp == Color::Grey {
-                                    cc = 0;
+                                    cycle_free = false;
                                 }
                             }
                         }
@@ -1537,7 +1539,7 @@ impl McmfCs2 {
                 }
             }
 
-            if cc == 0 {
+            if !cycle_free {
                 break;
             }
             let mut bmax: usize = 0;
@@ -1602,7 +1604,7 @@ impl McmfCs2 {
                                         0
                                     }
                                 };
-                                if j_rank < j_new_rank && cc == 1 {
+                                if j_rank < j_new_rank && cycle_free {
                                     self.nodes[j].rank = j_new_rank;
                                     if j_rank > 0 {
                                         let b_old = j_rank as usize;
@@ -1620,7 +1622,7 @@ impl McmfCs2 {
                 b -= 1;
             }
 
-            if cc == 0 {
+            if !cycle_free {
                 break;
             }
         }
