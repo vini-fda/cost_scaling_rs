@@ -1845,23 +1845,6 @@ impl McmfCs2 {
         true
     }
 
-    fn check_eps_opt(&self) -> i32 {
-        for i in 0..self.sentinel_node {
-            let a_start = self.nodes[i].suspended;
-            let a_stop = self.nodes[i + 1].suspended;
-            for a in a_start..a_stop {
-                if self.arcs[a].res_capacity > 0 {
-                    let j = self.arcs[a].head;
-                    let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
-                    if rc < -self.epsilon {
-                        return 0;
-                    }
-                }
-            }
-        }
-        1
-    }
-
     fn init_solution(&mut self) {
         for a in 0..self.sentinel_arc {
             if self.arcs[a].res_capacity > 0 && self.arcs[a].cost < 0 {
