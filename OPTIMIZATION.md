@@ -107,9 +107,23 @@ ldur  x6, [x3, #-8]          ; load arcs[a].cost
 sub   x10, x10, x6           ; dp = price - cost
 ```
 
-The `madd` (multiply-add) computes `head_index * sizeof(Node) + base_pointer`. In the C version, `a->head` is already a `node*`, so this becomes a single `ldr` — no multiplication. The multiply itself is fast on Apple Silicon (single-cycle throughput), but it adds **latency** on the critical dependency chain: the address for the `price` load depends on the result of `madd`, which depends on the `head` index load. This serializes three dependent operations (load → multiply → load) where C has only two (load → load).
+For comparison, the C version's inner loop (compiled with `gcc -O3`, AArch64):
 
-Note that `sizeof(Node) = 80`, which is not a power of 2 — the compiler cannot replace the multiply with a shift. The sequential arc access (`self.arcs[a]` where `a` increments by 1) is strength-reduced by LLVM into pointer increments (`add x3, x3, #32`), so the arc stride multiply is already eliminated. Only the data-dependent node access pays the cost.
+```asm
+ldr   x16, [x15]            ; load arcs[a].res_capacity
+; ... branch if < 1 ...
+ldp   x17, x16, [x15, #8]  ; load cost AND head pointer in ONE instruction
+ldr   x16, [x16, #32]       ; load head->price (direct pointer chase)
+sub   x16, x16, x17         ; dp = price - cost
+```
+
+Two key differences:
+
+1. **No multiply.** C's `a->head` is already a `node*`. The load at `[x16, #32]` goes straight to `price` with a fixed offset — no address arithmetic beyond the offset. In Rust, the `madd` instruction (multiply-add) computes `head_index * sizeof(Node) + base_pointer`, adding latency to the critical dependency chain: load index → multiply → load price (3 dependent ops) vs C's load pointer → load price (2 dependent ops).
+
+2. **Load pair (`ldp`).** GCC loads both `cost` and `head` in a single `ldp` instruction from adjacent struct fields. LLVM does not emit `ldp` for the Rust version because the fields are accessed at different points in the loop body and the struct layout differs (indices vs pointers).
+
+`sizeof(Node) = 80` is not a power of 2, so the compiler cannot replace the multiply with a shift. The sequential arc access (`self.arcs[a]` where `a` increments by 1) is strength-reduced by LLVM into pointer increments (`add x3, x3, #32`), so the arc stride multiply is already eliminated. Only the data-dependent node access pays the cost.
 
 ## Shrinking Node to 64 bytes (rejected)
 
