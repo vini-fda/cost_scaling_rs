@@ -578,8 +578,8 @@ impl McmfCs2 {
     }
 
     /// Handle an error and terminate.
-    fn err_end(&self, cc: Cs2Error) {
-        panic!("CS2 error: code {:?}", cc);
+    fn err_end(&self, error_code: Cs2Error) {
+        panic!("CS2 error: code {:?}", error_code);
     }
 
     /// Allocate internal arrays and prepare for receiving arcs.
