@@ -982,20 +982,16 @@ impl McmfCs2 {
         if p_max != self.price_min {
             self.nodes[i].price = p_max - self.epsilon;
             self.nodes[i].current = a_max;
-        } else {
-            if self.nodes[i].suspended == self.nodes[i].first {
-                if self.nodes[i].excess == 0 {
-                    self.nodes[i].price = self.price_min;
-                } else {
-                    if self.n_ref == 1 {
-                        self.err_end(UNFEASIBLE);
-                    } else {
-                        self.err_end(PRICE_OFL);
-                    }
-                }
+        } else if self.nodes[i].suspended == self.nodes[i].first {
+            if self.nodes[i].excess == 0 {
+                self.nodes[i].price = self.price_min;
+            } else if self.n_ref == 1 {
+                self.err_end(UNFEASIBLE);
             } else {
-                self.flag_price = 1;
+                self.err_end(PRICE_OFL);
             }
+        } else {
+            self.flag_price = 1;
         }
 
         self.n_relabel += 1;
@@ -1096,12 +1092,10 @@ impl McmfCs2 {
                         }
 
                         n_in_bad += 1;
-                    } else {
-                        if (rc < self.cut_on as i64) && (rc > -(self.cut_on as i64)) {
-                            self.nodes[i].first -= 1;
-                            let b = self.nodes[i].first;
-                            self.exchange(a, b);
-                        }
+                    } else if (rc < self.cut_on as i64) && (rc > -(self.cut_on as i64)) {
+                        self.nodes[i].first -= 1;
+                        let b = self.nodes[i].first;
+                        self.exchange(a, b);
                     }
                 }
             }
@@ -1358,10 +1352,8 @@ impl McmfCs2 {
                         if rc < 0 {
                             let dr = (-rc as f64 - 0.5) / self.epsilon as f64;
                             let j_rank = dr as i64 + i_rank;
-                            if j_rank < self.linf as i64 {
-                                if j_rank > self.nodes[j].rank {
-                                    self.nodes[j].rank = j_rank;
-                                }
+                            if j_rank < self.linf as i64 && j_rank > self.nodes[j].rank {
+                                self.nodes[j].rank = j_rank;
                             }
                         }
                     }
@@ -1536,10 +1528,8 @@ impl McmfCs2 {
                         if rc < 0 {
                             let dr = -rc;
                             let j_rank = dr + i_rank;
-                            if j_rank < self.linf as i64 {
-                                if j_rank > self.nodes[j].rank {
-                                    self.nodes[j].rank = j_rank;
-                                }
+                            if j_rank < self.linf as i64 && j_rank > self.nodes[j].rank {
+                                self.nodes[j].rank = j_rank;
                             }
                         }
                     }
@@ -1807,10 +1797,8 @@ impl McmfCs2 {
                     if self.price_refine() == 0 {
                         break;
                     }
-                    if self.n_ref >= PRICE_OUT_START {
-                        if self.price_in() != 0 {
-                            break;
-                        }
+                    if self.n_ref >= PRICE_OUT_START && self.price_in() != 0 {
+                        break;
                     }
                     cc = self.update_epsilon();
                     if cc != 0 {
@@ -1985,7 +1973,7 @@ impl McmfCs2 {
         }
 
         // double the arc count (forward + backward)
-        self.m = 2 * self.m;
+        self.m *= 2;
         self.cs2_initialize();
         self.print_graph();
 
