@@ -2,5 +2,28 @@
 name = "cost-scaling-rs"
 version = "0.1.0"
 edition = "2024"
+authors = ["Vinícius Freitas de Almeida <vinifreitas.d.a@gmail.com>"]
+description = "CS2 minimum-cost maximum-flow algorithm (cost-scaling successive approximation)"
+license = "MIT"
+repository = "https://github.com/vini-fda/cost_scaling_rs"
+keywords = ["min-cost-flow", "network-flow", "optimization", "graph", "cs2"]
+categories = ["algorithms", "science"]
+rust-version = "1.85"
 
 [dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "cs2_bench"
+harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.bench]
+inherits = "release"
+debug = 2

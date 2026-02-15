@@ -3,6 +3,9 @@
 //! This is a Rust implementation of the CS2 min-cost-max-flow scaling algorithm,
 //! translated from the original C implementation.
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 pub mod goto;
 pub mod parser;
 // ---------------------------------------------------------------------------
