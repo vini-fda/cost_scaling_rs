@@ -74,10 +74,21 @@ C reference:             282.7ms ± 7.4ms
 
 ## Remaining gap (~10%)
 
-The ~10% CPU time gap between Rust and C likely comes from:
+The hot line in `relabel`'s inner loop illustrates the core difference between the two implementations.
 
-- **Index vs pointer indirection:** C traverses arcs/nodes via direct pointer dereference (`arc->head`), while Rust uses index-based access (`self.nodes[self.arcs[a].head]`), adding a base-pointer dependency.
-- **Struct layout:** Both use equivalent field sizes (8 bytes each), but the compiler may pad or order fields differently.
-- **Code generation differences:** LLVM may generate slightly different instruction sequences for Rust's iterator-based loops vs C's pointer arithmetic.
+**C** (`cs2/cs2.c:619`):
+```c
+dp = ((a -> head) -> price) - (a -> cost);
+```
 
-These are inherent to the index-based design (chosen for safety and simplicity over the C pointer-based approach) and are unlikely to be worth optimizing further.
+`a` is a pointer to an `arc` struct. `a->head` is a pointer to a `node` struct. Each `->` is a single load at a fixed offset from the pointer — no arithmetic beyond the offset. Total: 3 loads.
+
+**Rust** (`src/lib.rs:1091–1092`):
+```rust
+let head = self.arcs[a].head;
+let dp = self.nodes[head].price - self.arcs[a].cost;
+```
+
+`a` and `head` are integer indices. Each indexing operation requires a base pointer + index × stride calculation. The compiler can strength-reduce the stride multiply for `self.arcs[a]` (since `a` increments by 1 each iteration), but the access through `self.nodes[head]` has a **data-dependent address**: the index loaded from `arc.head` must be multiplied by `sizeof(Node)` before the node can be accessed. In C, `a->head` is already a pointer — no multiplication needed.
+
+This dependent address calculation is the primary source of the ~10% gap. It is inherent to the index-based design (chosen for memory safety and `#![forbid(unsafe_code)]`) and is not something bounds-check elimination can help with, as confirmed by the unchecked indexing experiment above.
