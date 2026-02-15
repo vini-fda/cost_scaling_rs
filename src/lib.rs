@@ -36,7 +36,7 @@ const UPDT_FREQ: f64 = 0.4;
 const UPDT_FREQ_S: f64 = 30.0;
 const SCALE_DEFAULT: f64 = 12.0;
 /// PRICE_OUT_START may not be less than 1
-const PRICE_OUT_START: i64 = 1;
+const PRICE_OUT_START: u64 = 1;
 const CUT_OFF_POWER: f64 = 0.44;
 const CUT_OFF_COEF: f64 = 1.5;
 const CUT_OFF_POWER2: f64 = 0.75;
@@ -50,7 +50,7 @@ const TIME_FOR_PRICE_IN2: i32 = 4;
 const TIME_FOR_PRICE_IN3: i32 = 6;
 
 const MAX_CYCLES_CANCELLED: i32 = 0;
-const START_CYCLE_CANCEL: i32 = 100;
+const START_CYCLE_CANCEL: u64 = 100;
 
 // ---------------------------------------------------------------------------
 // Structs
@@ -175,23 +175,23 @@ pub struct McmfCs2 {
     dnode: NodeIndex,
 
     /// Number of relabels from last price update.
-    n_rel: i64,
+    n_rel: u64,
     /// Current number of refines.
-    n_ref: i64,
+    n_ref: u64,
     /// Current number of nodes with excess.
-    n_src: i64,
-    n_push: i64,
-    n_relabel: i64,
-    n_discharge: i64,
-    n_refine: i64,
-    n_update: i64,
-    n_scan: i64,
-    n_prscan: i64,
-    n_prscan1: i64,
-    n_prscan2: i64,
-    n_bad_pricein: i64,
-    n_bad_relabel: i64,
-    n_prefine: i64,
+    n_src: u64,
+    n_push: u64,
+    n_relabel: u64,
+    n_discharge: u64,
+    n_refine: u64,
+    n_update: u64,
+    n_scan: u64,
+    n_prscan: u64,
+    n_prscan1: u64,
+    n_prscan2: u64,
+    n_bad_pricein: u64,
+    n_bad_relabel: u64,
+    n_prefine: u64,
 
     /// Finds an optimal flow with no zero-cost cycles.
     no_zero_cycles: bool,
@@ -1228,7 +1228,7 @@ impl McmfCs2 {
         let mut cc: i32 = 1;
         let mut snc: i32 = 0;
 
-        self.snc_max = if self.n_ref >= START_CYCLE_CANCEL as i64 {
+        self.snc_max = if self.n_ref >= START_CYCLE_CANCEL {
             MAX_CYCLES_CANCELLED
         } else {
             0
