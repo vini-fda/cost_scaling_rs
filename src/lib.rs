@@ -1065,6 +1065,14 @@ impl McmfCs2 {
         }
     }
 
+    /// Attempts to relabel node of index `i` by scanning its outgoing residual arcs and
+    /// updating its price (label) to the best admissible value.
+    ///
+    /// This is a local relaxation step over the adjacency list
+    /// of node `i`: it finds the neighbor that maximizes a reduced-price expression
+    /// and either selects an admissible arc or raises `i`’s label accordingly.
+    /// 
+    /// Returns 1 (`true`) if an admissible outgoing arc is found, and 0 (`false`) otherwise.
     fn relabel(&mut self, i: NodeIndex) -> Result<i32, Cs2Error> {
         let mut p_max = self.price_min;
         let i_price = self.nodes[i].price;
