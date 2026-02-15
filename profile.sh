@@ -68,22 +68,13 @@ if [[ -z "$PROBLEM" ]]; then
     exit 1
 fi
 
-# Create a wrapper that runs multiple iterations for better sampling
-WRAPPER=$(mktemp)
-trap "rm -f $WRAPPER" EXIT
-cat > "$WRAPPER" << EOF
-#!/usr/bin/env bash
-for i in \$(seq 1 $ITERATIONS); do
-    $(pwd)/target/release/cost-scaling-rs $(pwd)/$PROBLEM > /dev/null
-done
-EOF
-chmod +x "$WRAPPER"
-
 echo "==> Profiling $ITERATIONS iterations of $(basename "$PROBLEM")..."
 echo "    (Each run takes ~300ms, total ~$((ITERATIONS * 300 / 1000))s)"
 echo ""
 
-samply record ${SAMPLY_ARGS[@]+"${SAMPLY_ARGS[@]}"} "$WRAPPER"
+samply record --iteration-count "$ITERATIONS" \
+    ${SAMPLY_ARGS[@]+"${SAMPLY_ARGS[@]}"} \
+    target/release/cost-scaling-rs "$PROBLEM"
 
 if [[ ${#SAMPLY_ARGS[@]} -gt 0 && " ${SAMPLY_ARGS[*]} " == *" --save-only "* ]]; then
     echo ""
