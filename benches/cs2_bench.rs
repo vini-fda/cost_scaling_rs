@@ -1,5 +1,5 @@
+use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{GotoParams, generate_to_string};
-use cost_scaling_rs::{McmfCs2, parser};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn goto_problem(n: i64) -> String {
@@ -18,10 +18,9 @@ fn bench_goto(c: &mut Criterion) {
     let mut group = c.benchmark_group("goto");
     for size in [15, 30, 60, 120, 250, 500] {
         let input = goto_problem(size);
-        let problem = parser::parse(&input).unwrap();
-        group.bench_with_input(BenchmarkId::from_parameter(size), &problem, |b, prob| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &input, |b, input| {
             b.iter(|| {
-                let solver = McmfCs2::from(prob.clone());
+                let solver = McmfCs2::from_dimacs(input).unwrap();
                 solver.min_cost(false, false).unwrap()
             });
         });

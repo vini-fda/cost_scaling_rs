@@ -8,23 +8,33 @@ CS2 solves the [minimum-cost flow problem](https://en.wikipedia.org/wiki/Minimum
 
 ### As a library
 
+**From a DIMACS file:**
+
 ```rust
-use cost_scaling_rs::{McmfCs2, parser};
+use cost_scaling_rs::McmfCs2;
 
-// Option 1: Parse a DIMACS .min file
 let input = std::fs::read_to_string("problem.min").unwrap();
-let problem = parser::parse(&input).unwrap();
-let solver = McmfCs2::from(problem);
+let solver = McmfCs2::from_dimacs(&input).unwrap();
+let solution = solver.min_cost(false, false).unwrap();
+println!("Optimal cost: {}", solution.objective_cost);
+```
 
-// Option 2: Build the problem programmatically
+**Programmatically:**
+
+```rust
+use cost_scaling_rs::McmfCs2;
+
 let mut solver = McmfCs2::new(6, 8); // 6 nodes, 8 arcs
+
+// Set supply (+) and demand (-) BEFORE adding arcs.
 solver.set_supply_demand_of_node(1, 10);  // source: +10
 solver.set_supply_demand_of_node(6, -10); // sink: -10
-solver.set_arc(1, 2, 0, 4, 1); // tail, head, lower_bound, upper_bound, cost
+
+// Add arcs: (tail, head, lower_bound, upper_bound, cost)
+solver.set_arc(1, 2, 0, 4, 1);
 solver.set_arc(1, 3, 0, 8, 5);
 // ... more arcs ...
 
-// Solve
 let solution = solver.min_cost(false, false).unwrap();
 println!("Optimal cost: {}", solution.objective_cost);
 

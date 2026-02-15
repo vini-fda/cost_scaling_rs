@@ -1,4 +1,4 @@
-use cost_scaling_rs::{McmfCs2, parser};
+use cost_scaling_rs::McmfCs2;
 use std::{env, fs, process};
 
 fn main() {
@@ -13,12 +13,11 @@ fn main() {
         process::exit(1);
     });
 
-    let problem = parser::parse(&input).unwrap_or_else(|e| {
+    let solver = McmfCs2::from_dimacs(&input).unwrap_or_else(|e| {
         eprintln!("Parse error: {e}");
         process::exit(1);
     });
 
-    let solver = McmfCs2::from(problem);
     let solution = solver.min_cost(false, false).unwrap_or_else(|e| {
         eprintln!("Solver error: {e:?}");
         process::exit(1);

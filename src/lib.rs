@@ -6,7 +6,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+#[doc(hidden)]
 pub mod goto;
+#[doc(hidden)]
 pub mod parser;
 // ---------------------------------------------------------------------------
 // Index types
@@ -133,6 +135,56 @@ pub enum Cs2Error {
 }
 
 /// CS2 min-cost max-flow solver.
+///
+/// Solves the minimum-cost maximum-flow problem on a directed network using
+/// the cost-scaling successive approximation method.
+///
+/// # Building a solver
+///
+/// **From a DIMACS `.min` string:**
+///
+/// ```
+/// use cost_scaling_rs::McmfCs2;
+///
+/// let input = "p min 4 5\n\
+///              n 1 4\n\
+///              n 4 -4\n\
+///              a 1 2 0 4 2\n\
+///              a 1 3 0 2 2\n\
+///              a 2 3 0 2 1\n\
+///              a 2 4 0 3 3\n\
+///              a 3 4 0 5 1\n";
+/// let solver = McmfCs2::from_dimacs(input).unwrap();
+/// let solution = solver.min_cost(false, false).unwrap();
+/// assert!(solution.objective_cost > 0.0);
+/// ```
+///
+/// **Programmatically:**
+///
+/// ```
+/// use cost_scaling_rs::McmfCs2;
+///
+/// let mut solver = McmfCs2::new(4, 5);
+///
+/// // Set supply (+) and demand (-) BEFORE adding arcs.
+/// solver.set_supply_demand_of_node(1, 4);   // source
+/// solver.set_supply_demand_of_node(4, -4);  // sink
+///
+/// // Add arcs: (tail, head, lower_bound, upper_bound, cost)
+/// solver.set_arc(1, 2, 0, 4, 2);
+/// solver.set_arc(1, 3, 0, 2, 2);
+/// solver.set_arc(2, 3, 0, 2, 1);
+/// solver.set_arc(2, 4, 0, 3, 3);
+/// solver.set_arc(3, 4, 0, 5, 1);
+///
+/// let solution = solver.min_cost(false, false).unwrap();
+///
+/// for (tail, head, flow) in solution.flows() {
+///     if flow > 0 {
+///         println!("  {tail} -> {head}: {flow}");
+///     }
+/// }
+/// ```
 pub struct McmfCs2 {
     /// Number of nodes.
     n: usize,
@@ -394,6 +446,19 @@ impl McmfCs2 {
         };
         solver.allocate_arrays();
         solver
+    }
+
+    /// Parse a DIMACS `.min` format string and construct a solver.
+    ///
+    /// This is the easiest way to create a solver from problem data.
+    /// See the [DIMACS format](http://lpsolve.sourceforge.net/5.5/DIMACS_mcf.htm) for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`parser::ParseError`] if the input is malformed.
+    pub fn from_dimacs(input: &str) -> Result<Self, parser::ParseError> {
+        let problem = parser::parse(input)?;
+        Ok(Self::from(problem))
     }
 
     // -----------------------------------------------------------------------

@@ -3,8 +3,8 @@
 //! For each DIMACS test input, both solvers run and their objective costs and per-arc flows
 //! are compared. The C binary is compiled automatically if missing.
 
+use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{self, GotoParams};
-use cost_scaling_rs::{McmfCs2, parser};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -46,8 +46,7 @@ struct SolverOutput {
 
 /// Run the Rust solver on a DIMACS input string.
 fn run_rust(input: &str) -> SolverOutput {
-    let problem = parser::parse(input).expect("failed to parse DIMACS input");
-    let solver = McmfCs2::from(problem);
+    let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
     let solution = solver.min_cost(false, false).expect("Rust solver failed");
 
     let mut flows = BTreeMap::new();
@@ -705,8 +704,7 @@ a 2 4 0 10 1
 a 1 3 0 10 5
 a 3 4 0 10 5
 ";
-    let problem = parser::parse(input).unwrap();
-    let solver = McmfCs2::from(problem);
+    let solver = McmfCs2::from_dimacs(input).unwrap();
     let solution = solver
         .min_cost(true, true)
         .expect("should be feasible and CS-optimal");
