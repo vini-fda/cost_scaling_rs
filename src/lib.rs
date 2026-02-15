@@ -1995,7 +1995,7 @@ impl McmfCs2 {
     ///
     /// Args
     /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    pub fn run_cs2(&mut self, check_solution: bool) -> i32 {
+    pub fn run_cs2(&mut self, check_solution: bool) {
         // ordering
         self.pre_processing();
 
@@ -2067,7 +2067,5 @@ impl McmfCs2 {
         if self.print_ans {
             self.print_solution();
         }
-
-        0
     }
 }
