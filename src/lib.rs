@@ -118,7 +118,7 @@ enum UpdateFlag {
 
 /// Fatal error condition that terminates the CS2 solver.
 #[derive(Clone, Copy, Debug)]
-enum Cs2Error {
+pub enum Cs2Error {
     /// The problem is infeasible (unbalanced or unreachable nodes).
     Infeasible,
     /// Price values overflowed numerical limits.
@@ -209,8 +209,6 @@ pub struct McmfCs2 {
 
     /// Finds an optimal flow with no zero-cost cycles.
     no_zero_cycles: bool,
-    /// Compute prices?
-    comp_duals: bool,
     /// To be able to restart after a cost function change.
     cost_restart: bool,
     /// Print the answer?
@@ -349,7 +347,6 @@ impl McmfCs2 {
             n_prefine: 0,
 
             no_zero_cycles: false,
-            comp_duals: false,
             cost_restart: false,
             print_ans: true,
             node_balance: Vec::new(),
@@ -575,11 +572,6 @@ impl McmfCs2 {
             // Swap capacities.
             self.cap.swap(a, b);
         }
-    }
-
-    /// Handle an error and terminate.
-    fn err_end(&self, error_code: Cs2Error) {
-        panic!("CS2 error: code {:?}", error_code);
     }
 
     /// Allocate internal arrays and prepare for receiving arcs.
@@ -962,7 +954,7 @@ impl McmfCs2 {
         }
     }
 
-    fn relabel(&mut self, i: NodeIndex) -> i32 {
+    fn relabel(&mut self, i: NodeIndex) -> Result<i32, Cs2Error> {
         let mut p_max = self.price_min;
         let i_price = self.nodes[i].price;
         let mut a_max: ArcIndex = NONE;
@@ -977,7 +969,7 @@ impl McmfCs2 {
                 if dp > p_max {
                     if i_price < dp {
                         self.nodes[i].current = a;
-                        return 1;
+                        return Ok(1);
                     }
                     p_max = dp;
                     a_max = a;
@@ -995,7 +987,7 @@ impl McmfCs2 {
                 if dp > p_max {
                     if i_price < dp {
                         self.nodes[i].current = a;
-                        return 1;
+                        return Ok(1);
                     }
                     p_max = dp;
                     a_max = a;
@@ -1010,9 +1002,9 @@ impl McmfCs2 {
             if self.nodes[i].excess == 0 {
                 self.nodes[i].price = self.price_min;
             } else if self.n_ref == 1 {
-                self.err_end(Cs2Error::Infeasible);
+                return Err(Cs2Error::Infeasible);
             } else {
-                self.err_end(Cs2Error::PriceOverflow);
+                return Err(Cs2Error::PriceOverflow);
             }
         } else {
             self.flag_price = 1;
@@ -1020,10 +1012,10 @@ impl McmfCs2 {
 
         self.n_relabel += 1;
         self.n_rel += 1;
-        0
+        Ok(0)
     }
 
-    fn discharge(&mut self, i: NodeIndex) {
+    fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
         self.n_discharge += 1;
 
         let mut a = self.nodes[i].current;
@@ -1033,7 +1025,7 @@ impl McmfCs2 {
         let is_admissible = self.arcs[a].res_capacity > 0
             && self.nodes[i].price + self.arcs[a].cost < self.nodes[j].price;
         if !is_admissible {
-            self.relabel(i);
+            self.relabel(i)?;
             a = self.nodes[i].current;
             j = self.arcs[a].head;
         }
@@ -1057,7 +1049,7 @@ impl McmfCs2 {
                 if self.nodes[j].excess >= 0 {
                     if self.nodes[j].excess > 0 {
                         self.n_src += 1;
-                        self.relabel(j);
+                        self.relabel(j)?;
                         self.insert_to_excess_q(j);
                     }
                     self.total_excess += j_exc;
@@ -1073,12 +1065,13 @@ impl McmfCs2 {
                 break;
             }
 
-            self.relabel(i);
+            self.relabel(i)?;
             a = self.nodes[i].current;
             j = self.arcs[a].head;
         }
 
         self.nodes[i].current = a;
+        Ok(())
     }
 
     fn price_in(&mut self) -> i32 {
@@ -1156,7 +1149,7 @@ impl McmfCs2 {
         n_in_bad
     }
 
-    fn refine(&mut self) {
+    fn refine(&mut self) -> Result<(), Cs2Error> {
         self.n_refine += 1;
         self.n_ref += 1;
         self.n_rel = 0;
@@ -1179,7 +1172,7 @@ impl McmfCs2 {
         }
 
         if self.total_excess <= 0 {
-            return;
+            return Ok(());
         }
 
         loop {
@@ -1196,7 +1189,7 @@ impl McmfCs2 {
             let i = self.remove_from_excess_q();
 
             if self.nodes[i].excess > 0 {
-                self.discharge(i);
+                self.discharge(i)?;
 
                 if self.time_for_update() || self.flag_price != 0 {
                     if self.nodes[i].excess > 0 {
@@ -1213,7 +1206,7 @@ impl McmfCs2 {
 
                     while self.flag_updt != UpdateFlag::Ok {
                         if self.n_ref == 1 {
-                            self.err_end(Cs2Error::Infeasible);
+                            return Err(Cs2Error::Infeasible);
                         } else {
                             self.flag_updt = UpdateFlag::Ok;
                             self.update_cut_off();
@@ -1235,6 +1228,7 @@ impl McmfCs2 {
                 }
             }
         }
+        Ok(())
     }
 
     /// Attempts to establish epsilon-optimality via price refinement and negative cycle cancellation.
@@ -1807,9 +1801,13 @@ impl McmfCs2 {
         self.excq_last = NONE;
     }
 
-    fn cs2_cost_restart(&mut self, objective_cost: &mut f64) {
+    fn cs2_cost_restart(
+        &mut self,
+        objective_cost: &mut f64,
+        comp_duals: bool,
+    ) -> Result<(), Cs2Error> {
         if !self.cost_restart {
-            return;
+            return Ok(());
         }
 
         println!("c ");
@@ -1842,7 +1840,7 @@ impl McmfCs2 {
                 if scaling_done {
                     break;
                 }
-                self.refine();
+                self.refine()?;
                 if self.n_ref >= PRICE_OUT_START {
                     self.price_out();
                 }
@@ -1852,10 +1850,14 @@ impl McmfCs2 {
             }
         }
 
-        self.finishup(objective_cost);
+        self.finishup(objective_cost, comp_duals);
+        Ok(())
     }
 
-    fn print_solution(&self) {
+    /// Prints the solution.
+    ///
+    /// comp_duals: whether to compute the prices.
+    fn print_solution(&self, comp_duals: bool) {
         if !self.print_ans {
             return;
         }
@@ -1878,7 +1880,7 @@ impl McmfCs2 {
             }
         }
 
-        if self.comp_duals {
+        if comp_duals {
             let mut min_price = MAX_32;
             for i in 0..self.sentinel_node {
                 min_price = min_price.min(self.nodes[i].price);
@@ -1914,7 +1916,7 @@ impl McmfCs2 {
         }
     }
 
-    fn finishup(&mut self, objective_cost: &mut f64) {
+    fn finishup(&mut self, objective_cost: &mut f64, comp_duals: bool) {
         // remove zero-cost cycle markers
         if self.no_zero_cycles {
             for a in 0..self.sentinel_arc {
@@ -1943,20 +1945,20 @@ impl McmfCs2 {
             self.nodes[i].price /= self.dn;
         }
 
-        if self.comp_duals {
+        if comp_duals {
             self.compute_prices();
         }
 
         *objective_cost = obj_internal;
     }
 
-    fn cs2(&mut self, objective_cost: &mut f64) {
+    fn cs2(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
         let mut scaling_done: bool;
 
         self.update_epsilon();
 
         loop {
-            self.refine();
+            self.refine()?;
 
             if self.n_ref >= PRICE_OUT_START {
                 self.price_out();
@@ -1988,14 +1990,16 @@ impl McmfCs2 {
             }
         }
 
-        self.finishup(objective_cost);
+        self.finishup(objective_cost, comp_duals);
+        Ok(())
     }
 
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, printing the solution.
     ///
     /// Args
     /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    pub fn run_cs2(&mut self, check_solution: bool) {
+    /// - comp_duals: Enable to compute prices
+    pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing();
 
@@ -2020,7 +2024,7 @@ impl McmfCs2 {
         );
 
         let mut objective_cost: f64 = 0.0;
-        self.cs2(&mut objective_cost);
+        self.cs2(&mut objective_cost, comp_duals)?;
 
         let t = 0.0f64;
         println!(
@@ -2065,7 +2069,116 @@ impl McmfCs2 {
         }
 
         if self.print_ans {
-            self.print_solution();
+            self.print_solution(comp_duals);
+        }
+        Ok(())
+    }
+
+    pub fn min_cost(
+        mut self,
+        check_solution: bool,
+        comp_duals: bool,
+    ) -> Result<McmfSolution, Cs2Error> {
+        // ordering
+        self.pre_processing();
+
+        // check solution setup
+        if check_solution {
+            self.node_balance = vec![0i64; self.n + 1];
+            for i in 0..self.n {
+                self.node_balance[i] = self.nodes[i].excess;
+            }
+        }
+
+        // double the arc count (forward + backward)
+        self.m *= 2;
+        self.cs2_initialize();
+
+        let mut objective_cost = 0.0;
+        self.cs2(&mut objective_cost, comp_duals)?;
+
+        if check_solution {
+            if !self.is_feasible() {
+                return Err(Cs2Error::Infeasible);
+            }
+            self.compute_prices();
+            if self.check_cs() {
+                return Err(Cs2Error::Infeasible);
+            }
+        }
+
+        Ok(McmfSolution {
+            objective_cost,
+            solver: self,
+        })
+    }
+}
+
+/// Result of a successful min-cost flow computation.
+pub struct McmfSolution {
+    /// Optimal objective cost.
+    pub objective_cost: f64,
+    /// The solver's state after completion
+    solver: McmfCs2,
+}
+
+#[derive(Debug)]
+pub struct McmfStats {
+    pub n_push: u64,
+    pub n_relabel: u64,
+    pub n_discharge: u64,
+    pub n_refine: u64,
+    pub n_update: u64,
+    pub n_scan: u64,
+    pub n_prscan: u64,
+    pub n_prscan1: u64,
+    pub n_bad_pricein: u64,
+    pub n_bad_relabel: u64,
+    pub n_prefine: u64,
+}
+
+impl McmfSolution {
+    /// Iterate over original (forward) arcs yielding (tail, head, flow)
+    pub fn flows(&self) -> impl Iterator<Item = (usize, usize, i64)> {
+        let s = &self.solver;
+        (0..s.n).flat_map(move |i| {
+            let a_start = s.nodes[i].suspended;
+            let a_stop = s.nodes[i + 1].suspended;
+            (a_start..a_stop).filter_map(move |a| {
+                if s.cap[a] > 0 {
+                    let flow = s.cap[a] - s.arcs[a].res_capacity;
+                    let tail = n_node(i, s.node_min) as usize;
+                    let head = n_node(s.arcs[a].head, s.node_min) as usize;
+                    Some((tail, head, flow))
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    /// Iterate over node prices yielding (node_id, price).
+    /// Only meaningful if comp_duals was enabled.
+    pub fn prices(&self) -> impl Iterator<Item = (usize, Price)> {
+        let s = &self.solver;
+        (0..s.sentinel_node).map(move |i| (n_node(i, s.node_min) as usize, s.nodes[i].price))
+    }
+
+    /// Returns statistics of the solution.
+    pub fn stats(&self) -> McmfStats {
+        let s = &self.solver;
+        McmfStats {
+            n_push: s.n_push,
+            n_relabel: s.n_relabel,
+            n_discharge: s.n_discharge,
+            n_refine: s.n_refine,
+            n_update: s.n_update,
+            n_scan: s.n_scan,
+            n_prscan: s.n_prscan,
+            n_prscan1: s.n_prscan1,
+            n_bad_pricein: s.n_bad_pricein,
+            n_bad_relabel: s.n_bad_relabel,
+            n_prefine: s.n_prefine,
         }
     }
 }

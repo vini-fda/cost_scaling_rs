@@ -1,6 +1,6 @@
-use cost_scaling_rs::McmfCs2;
+use cost_scaling_rs::{Cs2Error, McmfCs2};
 
-fn main() {
+fn main() -> Result<(), Cs2Error> {
     let num_nodes = 6;
     let num_arcs = 8;
     let mut solver = McmfCs2::new(num_nodes, num_arcs);
@@ -16,5 +16,6 @@ fn main() {
     solver.set_supply_demand_of_node(1, 10);
     solver.set_supply_demand_of_node(6, -10);
 
-    solver.run_cs2(true);
+    solver.run_cs2(true, false)?;
+    Ok(())
 }
