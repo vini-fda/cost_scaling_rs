@@ -10,8 +10,8 @@
 type NodeIndex = usize;
 type ArcIndex = usize;
 type BucketIndex = usize;
-type Price = i64;
-type Excess = i64;
+pub type Price = i64;
+pub type Excess = i64;
 
 /// Sentinel value representing a null/invalid index (replaces NULL pointers).
 const NONE: usize = usize::MAX;
@@ -642,7 +642,7 @@ impl McmfCs2 {
         self.pos_current += 2;
     }
 
-    pub fn set_supply_demand_of_node(&mut self, id: usize, excess: i64) {
+    pub fn set_supply_demand_of_node(&mut self, id: usize, excess: Excess) {
         assert!(id <= self.n, "Node id out of bounds");
         self.nodes[id].excess = excess;
         if excess > 0 {
