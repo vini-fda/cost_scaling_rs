@@ -1065,15 +1065,22 @@ impl McmfCs2 {
         }
     }
 
-    /// Attempts to relabel node of index `i` by scanning its outgoing residual arcs and
-    /// updating its price (label) to the best admissible value.
+    /// Relabels node `i` by scanning its outgoing residual arcs for the best
+    /// admissible price.
     ///
-    /// This is a local relaxation step over the adjacency list
-    /// of node `i`: it finds the neighbor that maximizes a reduced-price expression
-    /// and either selects an admissible arc or raises `i`’s label accordingly.
-    /// 
-    /// Returns 1 (`true`) if an admissible outgoing arc is found, and 0 (`false`) otherwise.
-    fn relabel(&mut self, i: NodeIndex) -> Result<i32, Cs2Error> {
+    /// Scans the adjacency list of node `i` in two passes (from `current+1` to
+    /// end, then from `first` to `current+1`) looking for the residual arc whose
+    /// head offers the maximum reduced cost `p_j - c_ij`. Three outcomes are
+    /// possible:
+    ///
+    /// - **Early exit (`Ok(true)`):** An arc with `dp > i_price` is found,
+    ///   meaning the current arc is already admissible — no price change needed.
+    /// - **Price update (`Ok(false)`):** The best arc has `dp <= i_price`.
+    ///   Node `i`'s price is lowered to `p_max - epsilon` and its current arc
+    ///   pointer is updated.
+    /// - **Error:** No residual arcs exist and all arcs are suspended, indicating
+    ///   infeasibility or price overflow.
+    fn relabel(&mut self, i: NodeIndex) -> Result<bool, Cs2Error> {
         let mut p_max = self.price_min;
         let i_price = self.nodes[i].price;
         let mut a_max: ArcIndex = NONE;
@@ -1088,7 +1095,7 @@ impl McmfCs2 {
                 if dp > p_max {
                     if i_price < dp {
                         self.nodes[i].current = a;
-                        return Ok(1);
+                        return Ok(true);
                     }
                     p_max = dp;
                     a_max = a;
@@ -1106,7 +1113,7 @@ impl McmfCs2 {
                 if dp > p_max {
                     if i_price < dp {
                         self.nodes[i].current = a;
-                        return Ok(1);
+                        return Ok(true);
                     }
                     p_max = dp;
                     a_max = a;
@@ -1131,7 +1138,7 @@ impl McmfCs2 {
 
         self.n_relabel += 1;
         self.n_rel += 1;
-        Ok(0)
+        Ok(false)
     }
 
     fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
