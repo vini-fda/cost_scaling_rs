@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-cargo install samply
+cargo install --locked samply
 ```
 
 ## Quick start
