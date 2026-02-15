@@ -16,6 +16,16 @@ fn main() -> Result<(), Cs2Error> {
     solver.set_supply_demand_of_node(1, 10);
     solver.set_supply_demand_of_node(6, -10);
 
-    solver.run_cs2(true, false)?;
+    // solver.run_cs2(true, false)?;
+    let solution = solver.min_cost(true, false)?;
+    println!("optimal cost = {}", solution.objective_cost);
+    println!("{:?}", solution.stats());
+    for (tail, head, flow) in solution.flows() {
+        println!("{} -> {}: {}", tail, head, flow);
+    }
+
+    for (node, price) in solution.prices() {
+        println!("p({}) = {}", node, price);
+    }
     Ok(())
 }

@@ -3,6 +3,8 @@
 //! This is a Rust implementation of the CS2 min-cost-max-flow scaling algorithm,
 //! translated from the original C implementation.
 
+pub mod goto;
+pub mod parser;
 // ---------------------------------------------------------------------------
 // Index types
 // ---------------------------------------------------------------------------
@@ -285,6 +287,25 @@ impl Default for Arc {
 impl Default for Bucket {
     fn default() -> Self {
         Bucket { p_first: NONE }
+    }
+}
+
+impl From<parser::DimacsMin> for McmfCs2 {
+    fn from(problem: parser::DimacsMin) -> Self {
+        let mut solver = McmfCs2::new(problem.nodes as usize, problem.arcs_count as usize);
+        for arc in &problem.arcs {
+            solver.set_arc(
+                arc.from as usize,
+                arc.to as usize,
+                arc.min_cap,
+                arc.max_cap,
+                arc.cost,
+            );
+        }
+        for node in &problem.node_descs {
+            solver.set_supply_demand_of_node(node.id as usize, node.supply);
+        }
+        solver
     }
 }
 
