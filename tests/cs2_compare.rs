@@ -97,8 +97,8 @@ fn run_c(input: &str) -> SolverOutput {
 
     for line in stdout.lines() {
         let line = line.trim();
-        if line.starts_with("s ") {
-            let val: f64 = line[2..]
+        if let Some(rest) = line.strip_prefix("s ") {
+            let val: f64 = rest
                 .trim()
                 .parse()
                 .expect("failed to parse cost from s line");
@@ -707,7 +707,9 @@ a 3 4 0 10 5
 ";
     let problem = parser::parse(input).unwrap();
     let solver = McmfCs2::from(problem);
-    let solution = solver.min_cost(true, true).expect("should be feasible and CS-optimal");
+    let solution = solver
+        .min_cost(true, true)
+        .expect("should be feasible and CS-optimal");
     assert!((solution.objective_cost - 20.0).abs() < 0.5);
 }
 

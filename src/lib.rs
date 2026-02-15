@@ -1931,7 +1931,7 @@ impl McmfCs2 {
         println!("\nGraph: {}", self.n);
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
-            println!("\nNode {}", ni);
+            println!("\nNode {ni}");
             let a_start = self.nodes[i].suspended;
             let a_stop = self.nodes[i + 1].suspended;
             for a in a_start..a_stop {
@@ -2058,10 +2058,7 @@ impl McmfCs2 {
         self.cs2(&mut objective_cost, comp_duals)?;
 
         let t = 0.0f64;
-        println!(
-            "c time:         {:15.2}    cost:       {:15.0}",
-            t, objective_cost
-        );
+        println!("c time:         {t:15.2}    cost:       {objective_cost:15.0}");
         println!(
             "c refines:      {:10}     discharges: {:10}",
             self.n_refine, self.n_discharge

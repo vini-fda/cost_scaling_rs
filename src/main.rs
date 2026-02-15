@@ -9,23 +9,23 @@ fn main() {
     }
 
     let input = fs::read_to_string(&args[1]).unwrap_or_else(|e| {
-        eprintln!("Error reading {}: {}", args[1], e);
+        eprintln!("Error reading {}: {e}", args[1]);
         process::exit(1);
     });
 
     let problem = parser::parse(&input).unwrap_or_else(|e| {
-        eprintln!("Parse error: {}", e);
+        eprintln!("Parse error: {e}");
         process::exit(1);
     });
 
     let solver = McmfCs2::from(problem);
     let solution = solver.min_cost(false, false).unwrap_or_else(|e| {
-        eprintln!("Solver error: {:?}", e);
+        eprintln!("Solver error: {e:?}");
         process::exit(1);
     });
 
     println!("s {:.0}", solution.objective_cost);
     for (tail, head, flow) in solution.flows() {
-        println!("f {:7} {:7} {:10}", tail, head, flow);
+        println!("f {tail:7} {head:7} {flow:10}");
     }
 }
