@@ -101,6 +101,16 @@ struct Bucket {
     p_first: NodeIndex,
 }
 
+/// The update flag.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum UpdateFlag {
+    /// Update is ok: we can continue.
+    Ok,
+    /// Update failed, some sources are unreachable: either the
+    /// problem is unfeasible or you have to return suspended arcs.
+    Failed,
+}
+
 /// CS2 min-cost max-flow solver.
 pub struct McmfCs2 {
     /// Number of nodes.
@@ -153,9 +163,9 @@ pub struct McmfCs2 {
     /// Signal to start price-in ASAP — maybe there is infeasibility
     /// because of suspended arcs.
     flag_price: i32,
-    /// If 1 — update failed, some sources are unreachable: either the
+    /// If Failed — update failed, some sources are unreachable: either the
     /// problem is unfeasible or you have to return suspended arcs.
-    flag_updt: i32,
+    flag_updt: UpdateFlag,
     /// Maximal number of cycles cancelled during price refine.
     snc_max: i32,
 
@@ -302,7 +312,7 @@ impl McmfCs2 {
             total_excess: 0,
 
             flag_price: 0,
-            flag_updt: 0,
+            flag_updt: UpdateFlag::Ok,
             snc_max: 0,
 
             dummy_node: NONE,
@@ -920,7 +930,7 @@ impl McmfCs2 {
         }
 
         if remain as f64 > 0.5 {
-            self.flag_updt = 1;
+            self.flag_updt = UpdateFlag::Failed;
         }
 
         let dp = (b as i64) * self.epsilon;
@@ -1187,11 +1197,11 @@ impl McmfCs2 {
 
                     self.price_update();
 
-                    while self.flag_updt != 0 {
+                    while self.flag_updt != UpdateFlag::Ok {
                         if self.n_ref == 1 {
                             self.err_end(UNFEASIBLE);
                         } else {
-                            self.flag_updt = 0;
+                            self.flag_updt = UpdateFlag::Ok;
                             self.update_cut_off();
                             self.n_bad_relabel += 1;
                             pr_in_int = 0;
