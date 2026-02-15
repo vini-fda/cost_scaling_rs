@@ -2108,7 +2108,7 @@ impl McmfCs2 {
                 return Err(Cs2Error::Infeasible);
             }
             self.compute_prices();
-            if self.check_cs() {
+            if !self.check_cs() {
                 return Err(Cs2Error::Infeasible);
             }
         }
