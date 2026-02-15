@@ -23,9 +23,6 @@ const NONE: usize = usize::MAX;
 const MAX_64: i64 = i64::MAX;
 const MAX_32: i64 = i32::MAX as i64;
 
-const WHITE: i64 = 0;
-const GREY: i64 = 1;
-const BLACK: i64 = 2;
 const PRICE_MAX: Price = MAX_64;
 
 const UNFEASIBLE: i32 = 2;
