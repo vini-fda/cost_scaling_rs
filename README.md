@@ -75,6 +75,16 @@ This runs:
 
 The C binary is compiled automatically on first test run.
 
+## Benchmarks
+
+Benchmarks use [Criterion.rs](https://github.com/bheisler/criterion.rs) and exercise the solver on GOTO networks of increasing size:
+
+```bash
+cargo bench
+```
+
+Results are printed to the terminal and HTML reports are generated in `target/criterion/`. On subsequent runs, Criterion reports relative performance changes automatically.
+
 ## Project structure
 
 ```
