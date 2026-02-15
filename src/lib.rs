@@ -2074,6 +2074,12 @@ impl McmfCs2 {
         Ok(())
     }
 
+    /// Executes the cost-scaling minimum-cost maximum-flow algorithm, returning the solution
+    /// as a [McmfSolution] object.
+    ///
+    /// Args
+    /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
+    /// - comp_duals: Enable to compute prices
     pub fn min_cost(
         mut self,
         check_solution: bool,
