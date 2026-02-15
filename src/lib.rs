@@ -10,6 +10,9 @@
 pub mod goto;
 #[doc(hidden)]
 pub mod parser;
+
+pub use parser::ParseError;
+
 // ---------------------------------------------------------------------------
 // Index types
 // ---------------------------------------------------------------------------
@@ -454,7 +457,7 @@ impl McmfCs2 {
     /// # Errors
     ///
     /// Returns a [`parser::ParseError`] if the input is malformed.
-    pub fn from_dimacs(input: &str) -> Result<Self, parser::ParseError> {
+    pub fn from_dimacs(input: &str) -> Result<Self, ParseError> {
         let problem = parser::parse(input)?;
         Ok(Self::from(problem))
     }
