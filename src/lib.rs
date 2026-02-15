@@ -293,6 +293,12 @@ impl Default for Bucket {
 impl From<parser::DimacsMin> for McmfCs2 {
     fn from(problem: parser::DimacsMin) -> Self {
         let mut solver = McmfCs2::new(problem.nodes as usize, problem.arcs_count as usize);
+        // Node supply/demand must be set before arcs, because set_arc adjusts
+        // excess for nonzero lower bounds (excess -= low for tail, excess += low
+        // for head). Setting nodes after arcs would overwrite those adjustments.
+        for node in &problem.node_descs {
+            solver.set_supply_demand_of_node(node.id as usize, node.supply);
+        }
         for arc in &problem.arcs {
             solver.set_arc(
                 arc.from as usize,
@@ -301,9 +307,6 @@ impl From<parser::DimacsMin> for McmfCs2 {
                 arc.max_cap,
                 arc.cost,
             );
-        }
-        for node in &problem.node_descs {
-            solver.set_supply_demand_of_node(node.id as usize, node.supply);
         }
         solver
     }
