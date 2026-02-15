@@ -25,9 +25,6 @@ const MAX_32: i64 = i32::MAX as i64;
 
 const PRICE_MAX: Price = MAX_64;
 
-const UNFEASIBLE: i32 = 2;
-const PRICE_OFL: i32 = 6;
-
 // Parameters
 const UPDT_FREQ: f64 = 0.4;
 const UPDT_FREQ_S: f64 = 30.0;
@@ -117,6 +114,15 @@ enum UpdateFlag {
     /// Update failed, some sources are unreachable: either the
     /// problem is unfeasible or you have to return suspended arcs.
     Failed,
+}
+
+/// Fatal error condition that terminates the CS2 solver.
+#[derive(Clone, Copy, Debug)]
+enum Cs2Error {
+    /// The problem is infeasible (unbalanced or unreachable nodes).
+    Infeasible,
+    /// Price values overflowed numerical limits.
+    PriceOverflow,
 }
 
 /// CS2 min-cost max-flow solver.
@@ -572,8 +578,8 @@ impl McmfCs2 {
     }
 
     /// Handle an error and terminate.
-    fn err_end(&self, cc: i32) {
-        panic!("CS2 error: code {}", cc);
+    fn err_end(&self, cc: Cs2Error) {
+        panic!("CS2 error: code {:?}", cc);
     }
 
     /// Allocate internal arrays and prepare for receiving arcs.
@@ -1004,9 +1010,9 @@ impl McmfCs2 {
             if self.nodes[i].excess == 0 {
                 self.nodes[i].price = self.price_min;
             } else if self.n_ref == 1 {
-                self.err_end(UNFEASIBLE);
+                self.err_end(Cs2Error::Infeasible);
             } else {
-                self.err_end(PRICE_OFL);
+                self.err_end(Cs2Error::PriceOverflow);
             }
         } else {
             self.flag_price = 1;
@@ -1207,7 +1213,7 @@ impl McmfCs2 {
 
                     while self.flag_updt != UpdateFlag::Ok {
                         if self.n_ref == 1 {
-                            self.err_end(UNFEASIBLE);
+                            self.err_end(Cs2Error::Infeasible);
                         } else {
                             self.flag_updt = UpdateFlag::Ok;
                             self.update_cut_off();
@@ -1231,9 +1237,12 @@ impl McmfCs2 {
         }
     }
 
-    fn price_refine(&mut self) -> i32 {
+    /// Attempts to establish epsilon-optimality via price refinement and negative cycle cancellation.
+    ///
+    /// Returns `true` if the solution is epilon-optimal, `false` if further refinement is needed.
+    fn price_refine(&mut self) -> bool {
         self.n_prefine += 1;
-        let mut cc: i32 = 1;
+        let mut eps_optimal = true;
         let mut snc: i32 = 0;
 
         self.snc_max = if self.n_ref >= START_CYCLE_CANCEL {
@@ -1281,7 +1290,7 @@ impl McmfCs2 {
                                 }
                                 if self.nodes[j].inp == Color::Grey {
                                     // cycle detected
-                                    cc = 0;
+                                    eps_optimal = false;
                                     nnc += 1;
                                     self.nodes[i].current = a;
 
@@ -1350,9 +1359,9 @@ impl McmfCs2 {
             // computing longest paths
             snc += nnc;
             if snc < self.snc_max {
-                cc = 1;
+                eps_optimal = true;
             }
-            if cc == 0 {
+            if !eps_optimal {
                 break;
             }
             let mut bmax: usize = 0;
@@ -1418,7 +1427,7 @@ impl McmfCs2 {
                                     }
                                 };
                                 if j_rank < j_new_rank {
-                                    if cc == 1 {
+                                    if eps_optimal {
                                         self.nodes[j].rank = j_new_rank;
                                         if j_rank > 0 {
                                             let b_old = j_rank as usize;
@@ -1441,13 +1450,13 @@ impl McmfCs2 {
                 b -= 1;
             }
 
-            if cc == 0 {
+            if !eps_optimal {
                 break;
             }
         }
 
         // finish: saturate non-epsilon-optimal arcs if needed
-        if cc == 0 {
+        if !eps_optimal {
             for i in 0..self.sentinel_node {
                 let a_start = self.nodes[i].first;
                 let a_stop = self.nodes[i + 1].suspended;
@@ -1464,7 +1473,7 @@ impl McmfCs2 {
             }
         }
 
-        cc
+        eps_optimal
     }
 
     fn compute_prices(&mut self) {
@@ -1812,7 +1821,8 @@ impl McmfCs2 {
         } else {
             loop {
                 loop {
-                    if self.price_refine() == 0 {
+                    // price_refine found negative cycles; need to refine
+                    if !self.price_refine() {
                         break;
                     }
                     if self.n_ref >= PRICE_OUT_START && self.price_in() != 0 {
@@ -1951,7 +1961,8 @@ impl McmfCs2 {
             }
 
             loop {
-                if self.price_refine() == 0 {
+                // need to refine further
+                if !self.price_refine() {
                     break;
                 }
 
