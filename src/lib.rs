@@ -1650,14 +1650,18 @@ impl McmfCs2 {
         }
     }
 
-    fn update_epsilon(&mut self) -> i32 {
+    /// Reduce epsilon by the scale factor for the next scaling iteration.
+    /// Returns `true` if epsilon has reached 1 (scaling is complete),
+    /// and `false` if epsilon was successfully reduced.
+    fn update_epsilon(&mut self) -> bool {
+        // decrease epsilon after epsilon-optimal flow is constructed
         if self.epsilon <= 1 {
-            return 1;
+            return true;
         }
         self.epsilon = (self.epsilon as f64 / self.f_scale).ceil() as Price;
         self.cut_off = self.cut_off_factor * self.epsilon as f64;
         self.cut_on = self.cut_off * CUT_OFF_GAP;
-        0
+        false
     }
 
     /// Checks the feasibility of the proposed problem.
@@ -1817,8 +1821,8 @@ impl McmfCs2 {
         self.cs_cost_reinit();
         println!("c Init. epsilon = {:.0}", self.epsilon as f64);
 
-        let mut cc = self.update_epsilon();
-        if cc != 0 {
+        let mut scaling_done = self.update_epsilon();
+        if scaling_done {
             println!("c Old solution is optimal");
         } else {
             loop {
@@ -1830,19 +1834,19 @@ impl McmfCs2 {
                     if self.n_ref >= PRICE_OUT_START && self.price_in() != 0 {
                         break;
                     }
-                    cc = self.update_epsilon();
-                    if cc != 0 {
+                    scaling_done = self.update_epsilon();
+                    if scaling_done {
                         break;
                     }
                 }
-                if cc != 0 {
+                if scaling_done {
                     break;
                 }
                 self.refine();
                 if self.n_ref >= PRICE_OUT_START {
                     self.price_out();
                 }
-                if self.update_epsilon() != 0 {
+                if self.update_epsilon() {
                     break;
                 }
             }
@@ -1947,7 +1951,7 @@ impl McmfCs2 {
     }
 
     fn cs2(&mut self, objective_cost: &mut f64) {
-        let mut cc: i32;
+        let mut scaling_done: bool;
 
         self.update_epsilon();
 
@@ -1958,7 +1962,7 @@ impl McmfCs2 {
                 self.price_out();
             }
 
-            if self.update_epsilon() != 0 {
+            if self.update_epsilon() {
                 break;
             }
 
@@ -1972,14 +1976,14 @@ impl McmfCs2 {
                     if self.price_in() != 0 {
                         break;
                     }
-                    cc = self.update_epsilon();
-                    if cc != 0 {
+                    scaling_done = self.update_epsilon();
+                    if scaling_done {
                         break;
                     }
                 }
             }
 
-            if self.update_epsilon() != 0 {
+            if self.update_epsilon() {
                 break;
             }
         }
