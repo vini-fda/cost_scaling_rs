@@ -73,7 +73,12 @@ pub enum ParseError {
     /// A required problem line (`p min ...`) was not found.
     MissingProblemLine,
     /// A line could not be parsed.
-    InvalidLine { line_num: usize, message: String },
+    InvalidLine {
+        /// 1-based line number where the error occurred.
+        line_num: usize,
+        /// Description of what went wrong.
+        message: String,
+    },
 }
 
 impl fmt::Display for ParseError {

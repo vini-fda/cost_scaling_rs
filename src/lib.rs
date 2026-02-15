@@ -15,7 +15,9 @@ pub mod parser;
 type NodeIndex = usize;
 type ArcIndex = usize;
 type BucketIndex = usize;
+/// Arc cost type (signed 64-bit integer).
 pub type Price = i64;
+/// Node supply/demand type (signed 64-bit integer).
 pub type Excess = i64;
 
 /// Sentinel value representing a null/invalid index (replaces NULL pointers).
@@ -618,6 +620,7 @@ impl McmfCs2 {
         self.total_n = 0;
     }
 
+    /// Add a directed arc from `tail_node_id` to `head_node_id` with the given bounds and cost.
     pub fn set_arc(
         &mut self,
         tail_node_id: usize,
@@ -685,6 +688,7 @@ impl McmfCs2 {
         self.pos_current += 2;
     }
 
+    /// Set the supply (positive) or demand (negative) of a node. Must be called before [`set_arc`](Self::set_arc).
     pub fn set_supply_demand_of_node(&mut self, id: usize, excess: Excess) {
         assert!(id <= self.n, "Node id out of bounds");
         self.nodes[id].excess = excess;
@@ -2158,16 +2162,27 @@ pub struct McmfSolution {
 /// Informational statistics about the min-cost flow computation.
 #[derive(Debug)]
 pub struct McmfStats {
+    /// Number of push operations.
     pub n_push: u64,
+    /// Number of relabel operations.
     pub n_relabel: u64,
+    /// Number of discharge operations.
     pub n_discharge: u64,
+    /// Number of price refinement phases.
     pub n_refine: u64,
+    /// Number of price update operations.
     pub n_update: u64,
+    /// Number of node scans.
     pub n_scan: u64,
+    /// Number of price scans.
     pub n_prscan: u64,
+    /// Number of type-1 price scans.
     pub n_prscan1: u64,
+    /// Number of bad price-in operations.
     pub n_bad_pricein: u64,
+    /// Number of bad relabel operations.
     pub n_bad_relabel: u64,
+    /// Number of price refinement restarts.
     pub n_prefine: u64,
 }
 
