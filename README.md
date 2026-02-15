@@ -86,13 +86,31 @@ The C binary is compiled automatically on first test run.
 
 ## Benchmarks
 
-Benchmarks use [Criterion.rs](https://github.com/bheisler/criterion.rs) and exercise the solver on GOTO networks of increasing size:
+### Criterion (Rust-only)
+
+Microbenchmarks using [Criterion.rs](https://github.com/bheisler/criterion.rs):
 
 ```bash
 cargo bench
 ```
 
-Results are printed to the terminal and HTML reports are generated in `target/criterion/`. On subsequent runs, Criterion reports relative performance changes automatically.
+HTML reports are generated in `target/criterion/`. Subsequent runs report relative performance changes.
+
+### Comparative (Rust vs C)
+
+End-to-end timing comparison against the reference C implementation using [hyperfine](https://github.com/sharkdp/hyperfine):
+
+```bash
+./bench-compare.sh
+```
+
+This builds both binaries with maximum optimization (`-O3`/LTO), generates GOTO problems at 500–10,000 nodes, and runs hyperfine on each. Extra arguments are forwarded to hyperfine:
+
+```bash
+./bench-compare.sh --warmup 5 --min-runs 50
+```
+
+**Dependencies:** `cargo`, `gcc`/`cc`, `make`, `hyperfine` (`brew install hyperfine` or `cargo install hyperfine`).
 
 ## Project structure
 
