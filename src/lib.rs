@@ -270,8 +270,6 @@ pub struct McmfCs2 {
 
     /// Finds an optimal flow with no zero-cost cycles.
     no_zero_cycles: bool,
-    /// To be able to restart after a cost function change.
-    cost_restart: bool,
     /// Print the answer?
     print_ans: bool,
     /// Per-node supply/demand balance.
@@ -375,7 +373,6 @@ impl From<parser::DimacsMin> for McmfCs2 {
 // McmfCs2 implementation
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 impl McmfCs2 {
     /// Create a new solver for a network with `num_nodes` nodes and `num_arcs` arcs.
     pub fn new(num_nodes: usize, num_arcs: usize) -> Self {
@@ -430,7 +427,6 @@ impl McmfCs2 {
             n_prefine: 0,
 
             no_zero_cycles: false,
-            cost_restart: false,
             print_ans: true,
             node_balance: Vec::new(),
 
@@ -534,15 +530,6 @@ impl McmfCs2 {
         self.excq_last = i;
     }
 
-    /// Insert node `i` at the front of the excess queue.
-    fn insert_to_front_excess_q(&mut self, i: NodeIndex) {
-        if self.empty_excess_q() {
-            self.excq_last = i;
-        }
-        self.nodes[i].q_next = self.excq_first;
-        self.excq_first = i;
-    }
-
     /// Remove the front node from the excess queue. Returns the removed node index.
     fn remove_from_excess_q(&mut self) -> NodeIndex {
         let i = self.excq_first;
@@ -557,11 +544,6 @@ impl McmfCs2 {
     // -----------------------------------------------------------------------
     // Stack-queue utilities (excess queue used as a stack)
     // -----------------------------------------------------------------------
-
-    /// Returns true if the stack-queue is empty.
-    fn empty_stackq(&self) -> bool {
-        self.empty_excess_q()
-    }
 
     /// Returns true if the stack-queue is non-empty.
     fn nonempty_stackq(&self) -> bool {
@@ -1843,136 +1825,6 @@ impl McmfCs2 {
             }
         }
         true
-    }
-
-    fn init_solution(&mut self) {
-        for a in 0..self.sentinel_arc {
-            if self.arcs[a].res_capacity > 0 && self.arcs[a].cost < 0 {
-                let df = self.arcs[a].res_capacity;
-                let i = self.arcs[self.arcs[a].sister].head;
-                let j = self.arcs[a].head;
-                self.increase_flow(i, j, a, df);
-            }
-        }
-    }
-
-    fn cs_cost_reinit(&mut self) {
-        if !self.cost_restart {
-            return;
-        }
-
-        for b in 0..self.l_bucket {
-            self.reset_bucket(b);
-        }
-
-        let mut rc: Price = 0;
-        for i in 0..self.sentinel_node {
-            rc = rc.min(self.nodes[i].price);
-            self.nodes[i].first = self.nodes[i].suspended;
-            self.nodes[i].current = self.nodes[i].first;
-            self.nodes[i].q_next = self.sentinel_node;
-        }
-
-        for i in 0..self.sentinel_node {
-            self.nodes[i].price = (self.nodes[i].price - rc) * self.dn;
-        }
-
-        for a in 0..self.sentinel_arc {
-            self.arcs[a].cost *= self.dn;
-        }
-
-        let mut sum: Price = 0;
-        for i in 0..self.sentinel_node {
-            let mut minc: Price = 0;
-            let a_start = self.nodes[i].first;
-            let a_stop = self.nodes[i + 1].suspended;
-            for a in a_start..a_stop {
-                if self.arcs[a].res_capacity > 0 {
-                    let j = self.arcs[a].head;
-                    let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
-                    if rc < 0 {
-                        minc = self.epsilon.max(-rc);
-                    }
-                }
-            }
-            sum += minc;
-        }
-
-        self.epsilon = (sum as f64 / self.dn as f64).ceil() as Price;
-
-        self.cut_off_factor = CUT_OFF_COEF * (self.n as f64).powf(CUT_OFF_POWER);
-        if self.cut_off_factor < CUT_OFF_MIN {
-            self.cut_off_factor = CUT_OFF_MIN;
-        }
-
-        self.n_ref = 0;
-        self.n_refine = 0;
-        self.n_discharge = 0;
-        self.n_push = 0;
-        self.n_relabel = 0;
-        self.n_update = 0;
-        self.n_scan = 0;
-        self.n_prefine = 0;
-        self.n_prscan = 0;
-        self.n_prscan1 = 0;
-        self.n_bad_pricein = 0;
-        self.n_bad_relabel = 0;
-        self.flag_price = 0;
-        self.excq_first = NONE;
-        self.excq_last = NONE;
-    }
-
-    fn cs2_cost_restart(
-        &mut self,
-        objective_cost: &mut f64,
-        comp_duals: bool,
-    ) -> Result<(), Cs2Error> {
-        if !self.cost_restart {
-            return Ok(());
-        }
-
-        println!("c ");
-        println!("c ******************************");
-        println!("c Restarting after a cost update");
-        println!("c ******************************");
-        println!("c");
-
-        self.cs_cost_reinit();
-        println!("c Init. epsilon = {:.0}", self.epsilon as f64);
-
-        let mut scaling_done = self.update_epsilon();
-        if scaling_done {
-            println!("c Old solution is optimal");
-        } else {
-            loop {
-                loop {
-                    // price_refine found negative cycles; need to refine
-                    if !self.price_refine() {
-                        break;
-                    }
-                    if self.n_ref >= PRICE_OUT_START && self.price_in() != 0 {
-                        break;
-                    }
-                    scaling_done = self.update_epsilon();
-                    if scaling_done {
-                        break;
-                    }
-                }
-                if scaling_done {
-                    break;
-                }
-                self.refine()?;
-                if self.n_ref >= PRICE_OUT_START {
-                    self.price_out();
-                }
-                if self.update_epsilon() {
-                    break;
-                }
-            }
-        }
-
-        self.finishup(objective_cost, comp_duals);
-        Ok(())
     }
 
     /// Prints the solution.
