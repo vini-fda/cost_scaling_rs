@@ -53,12 +53,12 @@ const START_CYCLE_CANCEL: u64 = 100;
 // Data types
 // ---------------------------------------------------------------------------
 
-/// Node coloring for DFS traversal
+/// Node coloring for DFS traversal.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Color {
-    /// Undiscovered node
+    /// Undiscovered node.
     White,
-    /// Node is on the current DFS stack (in progress)
+    /// Node is on the current DFS stack (in progress).
     Grey,
     /// All outgoing arcs have been fully explored.
     Black,
