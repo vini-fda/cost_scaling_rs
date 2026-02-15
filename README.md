@@ -6,6 +6,17 @@ CS2 solves the [minimum-cost flow problem](https://en.wikipedia.org/wiki/Minimum
 
 ## Usage
 
+### Input format
+
+The solver accepts the standard [DIMACS minimum-cost flow format](http://lpsolve.sourceforge.net/5.5/DIMACS_mcf.htm):
+
+```
+c comment lines
+p min <nodes> <arcs>
+n <node_id> <supply>
+a <tail> <head> <lower_bound> <upper_bound> <cost>
+```
+
 ### As a library
 
 **From a DIMACS file:**
@@ -57,17 +68,6 @@ Outputs the solution in DIMACS format:
 s <objective_cost>
 f <tail> <head> <flow>
 ...
-```
-
-### Input format
-
-The solver accepts the standard [DIMACS minimum-cost flow format](http://lpsolve.sourceforge.net/5.5/DIMACS_mcf.htm):
-
-```
-c comment lines
-p min <nodes> <arcs>
-n <node_id> <supply>
-a <tail> <head> <lower_bound> <upper_bound> <cost>
 ```
 
 ## Testing
