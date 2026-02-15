@@ -1974,7 +1974,7 @@ impl McmfCs2 {
     }
 
     fn cs2(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
-        let mut scaling_done: bool;
+        let mut scaling_done = false;
 
         self.update_epsilon();
 
@@ -2006,7 +2006,7 @@ impl McmfCs2 {
                 }
             }
 
-            if self.update_epsilon() {
+            if scaling_done {
                 break;
             }
         }
