@@ -141,6 +141,8 @@ pub enum Cs2Error {
 ///
 /// # Building a solver
 ///
+/// **From a DIMACS `.min` file:** use [`from_dimacs_file`](Self::from_dimacs_file).
+///
 /// **From a DIMACS `.min` string:**
 ///
 /// ```
@@ -459,6 +461,19 @@ impl McmfCs2 {
     pub fn from_dimacs(input: &str) -> Result<Self, parser::ParseError> {
         let problem = parser::parse(input)?;
         Ok(Self::from(problem))
+    }
+
+    /// Read a DIMACS `.min` file from disk and construct a solver.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or the contents are malformed.
+    pub fn from_dimacs_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let input = std::fs::read_to_string(path)?;
+        let solver = Self::from_dimacs(&input)?;
+        Ok(solver)
     }
 
     // -----------------------------------------------------------------------
