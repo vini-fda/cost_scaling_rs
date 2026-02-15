@@ -1,5 +1,5 @@
 use cost_scaling_rs::McmfCs2;
-use std::{env, fs, process};
+use std::{env, process};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -8,12 +8,7 @@ fn main() {
         process::exit(1);
     }
 
-    let input = fs::read_to_string(&args[1]).unwrap_or_else(|e| {
-        eprintln!("Error reading {}: {e}", args[1]);
-        process::exit(1);
-    });
-
-    let solver = McmfCs2::from_dimacs(&input).unwrap_or_else(|e| {
+    let solver = McmfCs2::from_dimacs_file(&args[1]).unwrap_or_else(|e| {
         eprintln!("Parse error: {e}");
         process::exit(1);
     });
