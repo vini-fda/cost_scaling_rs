@@ -2128,6 +2128,7 @@ pub struct McmfSolution {
     solver: McmfCs2,
 }
 
+/// Informational statistics about the min-cost flow computation.
 #[derive(Debug)]
 pub struct McmfStats {
     pub n_push: u64,
