@@ -26,7 +26,7 @@ fn cs2_binary() -> PathBuf {
         if !bin.exists() {
             let status = Command::new("make")
                 .current_dir(&cs2_dir)
-                .arg("cs2.exe")
+                .arg("release")
                 .status()
                 .expect("failed to run make for cs2");
             assert!(status.success(), "cs2 compilation failed");
