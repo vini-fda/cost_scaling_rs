@@ -7,18 +7,12 @@
 # - CHECK_SOLUTION check feasibility/optimality. Note: HIGH OVERHEAD!
 
 # change these to suit your system
-CCOMP = gcc
-#CCOMP = g++
-#CCOMP = gcc-4
-#CFLAGS = -O4 -DNDEBUG
-#CFLAGS = -g -DCHECK_SOLUTION -Wall
-CFLAGS = -g -Wall
-#CFLAGS = -O4 -DNDEBUG -DNO_ZERO_CYCLES
+CCOMP=clang
+CFLAGS=-g -Wall -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART
 BIN=cs2
 
-cs2.exe: cs2.c parser_cs2.c types_cs2.h timer.c
-#	$(CCOMP) $(CFLAGS) -o $(BIN) cs2.c -lm
-	$(CCOMP) $(CFLAGS) -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART -o $(BIN) cs2.c -lm
+cs2: cs2.c parser_cs2.c types_cs2.h timer.c
+	$(CCOMP) $(CFLAGS) -o $(BIN) cs2.c -lm
 
 clean:
 	rm -f $(BIN) *~
