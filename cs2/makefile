@@ -11,6 +11,8 @@ BIN = cs2
 
 SRC = cs2.c parser_cs2.c timer.c
 
+HEADERS = types_cs2.h
+
 # Program feature flags (toggle here)
 COMPILER_DEFS = -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART
 
@@ -22,13 +24,13 @@ CFLAGS_DEBUG   = -O0 -g $(COMPILER_DEFS)
 # Default target
 all: release
 
-release: $(SRC)
+release: $(SRC) $(HEADERS)
 	$(CCOMP) $(CFLAGS_RELEASE) $(SRC) -o $(BIN) -lm
 
-profile: $(SRC)
+profile: $(SRC) $(HEADERS)
 	$(CCOMP) $(CFLAGS_PROFILE) $(SRC) -o $(BIN) -lm
 
-debug: $(SRC)
+debug: $(SRC) $(HEADERS)
 	$(CCOMP) $(CFLAGS_DEBUG) $(SRC) -o $(BIN) -lm
 
 clean:
