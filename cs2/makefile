@@ -1,10 +1,10 @@
 # makefile for cs2
-# compileler definitions
-# COMP_DUALS to compute prices
-# PRINT_ANS to print flow (and prices if COMP_DUAL defined)
-# COST_RESTART to be able to restart after a cost function change
-# NO_ZERO_CYCLES finds an opeimal flow with no zero-cost cycles
-# CHECK_SOLUTION check feasibility/optimality. HIGH OVERHEAD!
+# Compiler definitions:
+# - COMP_DUALS to compute prices
+# - PRINT_ANS to print flow (and prices if COMP_DUAL defined)
+# - COST_RESTART to be able to restart after a cost function change
+# - NO_ZERO_CYCLES finds an optimal flow with no zero-cost cycles
+# - CHECK_SOLUTION check feasibility/optimality. Note: HIGH OVERHEAD!
 
 # change these to suit your system
 CCOMP = gcc
