@@ -51,3 +51,39 @@ In the Firefox Profiler UI:
   ```
 - **Too few samples**: Increase `--iterations` or use a larger problem size. Each sample is taken every ~1ms, so a 300ms run only gets ~300 samples.
 - **macOS permission errors**: samply cannot profile system-signed binaries (e.g. `/usr/bin/bash`). The script profiles the Rust binary directly to avoid this. If you still get permission errors, try running with `sudo` or check System Preferences > Privacy & Security > Developer Tools.
+
+## Profiling the C reference implementation
+
+The `cs2/` directory contains the original C implementation. To profile it:
+
+### 1. Build with the profile target
+
+```bash
+cd cs2
+make profile
+```
+
+This compiles with `-O2 -g -fno-omit-frame-pointer`, which keeps optimizations close to release while preserving debug symbols and frame pointers for accurate stack unwinding.
+
+### 2. Run samply
+
+The C binary reads DIMACS input from stdin, so use shell redirection:
+
+```bash
+samply record ./cs2/cs2 < testdata/case3.txt
+```
+
+This profiles the run and opens the Firefox Profiler in your browser.
+
+To save the profile for later viewing instead:
+
+```bash
+samply record --save-only -o cs2-profile.json -- ./cs2/cs2 < testdata/case3.txt
+samply load cs2-profile.json   # open it later
+```
+
+### 3. Tips
+
+- **Use a large input** for meaningful samples. Small inputs finish in <1ms and produce very few samples. Generate larger GOTO problems with the Rust binary or use a bigger DIMACS file.
+- **Don't wrap in `sh -c`** — samply cannot profile system-signed binaries on macOS. Always invoke `./cs2/cs2` directly.
+- Since the C code uses `#include` to pull in `parser_cs2.c` and `timer.c`, all functions appear under `cs2.c` in the profiler. Look for `refine`, `discharge`, `price_update`, `relabel`, `price_refine` in the call tree.
