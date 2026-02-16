@@ -6,13 +6,30 @@
 # - NO_ZERO_CYCLES finds an optimal flow with no zero-cost cycles
 # - CHECK_SOLUTION check feasibility/optimality. Note: HIGH OVERHEAD!
 
-# change these to suit your system
-CCOMP=clang
-CFLAGS=-g -Wall -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART
-BIN=cs2
+CCOMP = clang
+BIN = cs2
 
-cs2: cs2.c parser_cs2.c types_cs2.h timer.c
-	$(CCOMP) $(CFLAGS) -o $(BIN) cs2.c -lm
+SRC = cs2.c parser_cs2.c timer.c
+
+# Program feature flags (toggle here)
+COMPILER_DEFS = -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART
+
+# Build modes
+CFLAGS_RELEASE = -O3 -march=native -flto -DNDEBUG $(COMPILER_DEFS)
+CFLAGS_PROFILE = -O2 -g -fno-omit-frame-pointer -march=native $(COMPILER_DEFS)
+CFLAGS_DEBUG   = -O0 -g $(COMPILER_DEFS)
+
+# Default target
+all: release
+
+release: $(SRC)
+	$(CCOMP) $(CFLAGS_RELEASE) $(SRC) -o $(BIN) -lm
+
+profile: $(SRC)
+	$(CCOMP) $(CFLAGS_PROFILE) $(SRC) -o $(BIN) -lm
+
+debug: $(SRC)
+	$(CCOMP) $(CFLAGS_DEBUG) $(SRC) -o $(BIN) -lm
 
 clean:
 	rm -f $(BIN) *~
