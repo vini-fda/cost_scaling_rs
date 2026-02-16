@@ -9,9 +9,9 @@
 CCOMP = clang
 BIN = cs2
 
-SRC = cs2.c parser_cs2.c timer.c
+SRC = cs2.c
 
-HEADERS = types_cs2.h
+HEADERS = types_cs2.h parser_cs2.c timer.c
 
 # Program feature flags (toggle here)
 COMPILER_DEFS = -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART

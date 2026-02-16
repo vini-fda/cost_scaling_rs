@@ -411,7 +411,7 @@ for ( a = arcs ; a != sentinel_arc ; a ++ )
 #endif
 
  if ((double) max_c * (double) dn > MAX_64)
-   fprintf(stdin, "Warning: arc lengths too large, overflow possible\n");
+   fprintf(stderr, "Warning: arc lengths too large, overflow possible\n");
 mmc = max_c * dn;
 
 linf   = (long) (dn * ceil(f_scale) + 2);
@@ -1808,7 +1808,7 @@ void cs2_cost_restart (double *obj_ad)
 
   cs_cost_reinit ();
   
-  printf ("c Init. epsilon = %6.0f\n", epsilon);
+  printf ("c Init. epsilon = %6.0lld\n", epsilon);
   cc = update_epsilon();
   
   if (cc != 0)
@@ -1878,7 +1878,7 @@ void print_solution(node *ndp, arc *arp, long nmin, double *cost)
     cost2 = MIN(*cost, i->price);
   }
   FOR_ALL_NODES_i {
-    printf("p %7ld %7.2lld\n", N_NODE(i), i->price - cost2);
+    printf("p %7ld %7lld\n", N_NODE(i), i->price - cost2);
   }
 #endif
 

@@ -76,7 +76,7 @@ long    no_lines=0,             /* no of current input line */
         pos_current=0;          /* 2*no_alines */
 
 char    in_line[MAXLINE],       /* for reading input line */
-        pr_type[3];             /* for reading type of the problem */
+        pr_type[4];             /* for reading type of the problem */
 
 int     k,                      /* temporary */
         err_no;                 /* no of detected error */
