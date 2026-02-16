@@ -1138,6 +1138,7 @@ impl McmfCs2 {
         Ok(false)
     }
 
+    #[inline(never)]
     fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
         self.n_discharge += 1;
 
@@ -1272,6 +1273,7 @@ impl McmfCs2 {
         n_in_bad
     }
 
+    #[inline(never)]
     fn refine(&mut self) -> Result<(), Cs2Error> {
         self.n_refine += 1;
         self.n_ref += 1;
@@ -1928,6 +1930,7 @@ impl McmfCs2 {
         *objective_cost = obj_internal;
     }
 
+    #[inline(never)]
     fn cs2(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
         let mut scaling_done = false;
 
