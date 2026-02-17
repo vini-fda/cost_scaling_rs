@@ -768,6 +768,16 @@ impl McmfCs2 {
         }
     }
 
+    /// Reorders arcs so each node's outgoing arcs are contiguous, then shifts
+    /// node indices to be zero-based.
+    ///
+    /// Uses `arc_first` as a prefix-sum array to compute the position of each
+    /// node's arc block, then permutes arcs in-place (swapping heads, costs,
+    /// capacities, and sister pointers) until every arc sits in its owner's
+    /// block. Frees the temporary `arc_first` and `arc_tail` arrays afterward.
+    ///
+    /// Must be called exactly once, after all arcs have been added via
+    /// [`set_arc`](Self::set_arc) and before [`cs2_initialize`](Self::cs2_initialize).
     fn pre_processing(&mut self) {
         assert!(
             (self.total_p - self.total_n).abs() == 0,
@@ -867,6 +877,17 @@ impl McmfCs2 {
         self.arc_tail.clear();
     }
 
+    /// Prepares the solver state for the cost-scaling iterations.
+    ///
+    /// Performs three key setup steps:
+    /// 1. **Saturates negative-cost arcs** — pushes flow to capacity on every
+    ///    arc with negative cost, converting the zero flow into a 0-optimal
+    ///    pseudoflow.
+    /// 2. **Scales costs** — multiplies all arc costs by `dn = n + 1` so that
+    ///    epsilon-optimality arithmetic uses integers throughout.
+    /// 3. **Allocates buckets** — creates the Dial-style bucket array used by
+    ///    [`price_update`](Self::price_update) and
+    ///    [`price_refine`](Self::price_refine), sized to `O(n * scale_factor)`.
     fn cs2_initialize(&mut self) {
         self.f_scale = SCALE_DEFAULT;
         self.sentinel_node = self.n;
@@ -1011,6 +1032,18 @@ impl McmfCs2 {
         self.nodes[i].rank = -1;
     }
 
+    /// Globally recomputes node prices using a Dijkstra-like bucket scan
+    /// (Goldberg §2.1: *price updates*).
+    ///
+    /// Seeds bucket 0 with all deficit nodes (excess < 0), then scans outward
+    /// through increasing buckets via [`up_node_scan`](Self::up_node_scan).
+    /// Scanning stops once enough surplus has been reached to cover
+    /// `total_excess`. Unsettled nodes have their prices decreased uniformly
+    /// by the furthest bucket distance reached.
+    ///
+    /// Sets `flag_updt = Failed` if not all surplus nodes are reachable from
+    /// deficit nodes, signaling potential infeasibility or a need to unsuspend
+    /// arcs.
     fn price_update(&mut self) {
         self.n_update += 1;
 
@@ -1141,6 +1174,18 @@ impl McmfCs2 {
         Ok(false)
     }
 
+    /// Applies push and relabel operations to active node `i` until it becomes
+    /// inactive (Goldberg §1, Fig 4: *discharge*).
+    ///
+    /// Implements the **push lookahead** heuristic (Goldberg §2.4): before
+    /// pushing to a node `j` with non-negative excess, checks whether `j` has
+    /// an outgoing admissible arc. If `j` had zero excess and becomes active
+    /// from the push, it is relabeled immediately to avoid the common scenario
+    /// where flow is pushed back to `i` on the next discharge of `j`.
+    ///
+    /// The loop alternates between pushing along the current arc and relabeling
+    /// when the current arc is inadmissible, stopping when `i`'s excess drops
+    /// to zero or `flag_price` signals that suspended arcs need attention.
     #[inline(never)]
     fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
         self.n_discharge += 1;
@@ -1199,6 +1244,19 @@ impl McmfCs2 {
         Ok(())
     }
 
+    /// Unsuspends arcs whose reduced cost has fallen back within the
+    /// `cut_on` threshold (reverse of [`price_out`](Self::price_out)).
+    ///
+    /// Scans each node's suspended arc range `[suspended, first)` and moves
+    /// arcs with `|rc| < cut_on` back into the active range by decrementing
+    /// `first` and exchanging. If any suspended arc is found to be admissible
+    /// (negative reduced cost with positive residual capacity), this is a
+    /// "bad fix-in": the arc is saturated and both the forward and reverse
+    /// arcs are unsuspended. On the first bad fix-in, `update_cut_off` is
+    /// called and the scan restarts with a wider threshold.
+    ///
+    /// Returns the number of bad fix-ins found. If nonzero, the excess queue
+    /// is rebuilt from scratch.
     fn price_in(&mut self) -> i32 {
         let mut bad_found = 0;
         let mut n_in_bad = 0;
@@ -1274,6 +1332,16 @@ impl McmfCs2 {
         n_in_bad
     }
 
+    /// Converts an epsilon-optimal pseudoflow into an (epsilon/alpha)-optimal
+    /// flow using the FIFO push-relabel method (Goldberg §1, Fig 2: *refine*).
+    ///
+    /// Enqueues all nodes with positive excess into the FIFO queue, then
+    /// repeatedly discharges the front node. Periodically triggers global
+    /// [`price_update`](Self::price_update) (based on relabel count and active
+    /// node count) and [`price_in`](Self::price_in) (to recover suspended arcs
+    /// that may have become relevant). If the price update fails because some
+    /// surplus nodes are unreachable, widens the arc-fixing threshold and
+    /// retries.
     #[inline(never)]
     fn refine(&mut self) -> Result<(), Cs2Error> {
         self.n_refine += 1;
@@ -1357,9 +1425,19 @@ impl McmfCs2 {
         Ok(())
     }
 
-    /// Attempts to establish epsilon-optimality via price refinement and negative cycle cancellation.
+    /// Attempts to find prices making the current flow epsilon-optimal without
+    /// changing the flow, using the scaling shortest-paths technique
+    /// (Goldberg §2.2: *price refinement*).
     ///
-    /// Returns `true` if the solution is epilon-optimal, `false` if further refinement is needed.
+    /// Each pass performs a DFS on the admissible graph to topologically sort
+    /// it. If a negative-cost cycle is found, it is saturated (cancelling flow
+    /// around the cycle) and epsilon-optimality fails. Otherwise, longest-path
+    /// distances `d'` are computed in the acyclic admissible graph (in units of
+    /// epsilon) using a reverse-topological bucket scan, and prices are adjusted
+    /// by `d' * epsilon`.
+    ///
+    /// Returns `true` if epsilon-optimal prices were found, `false` if an
+    /// admissible cycle was detected (requiring a subsequent [`refine`](Self::refine)).
     fn price_refine(&mut self) -> bool {
         self.n_prefine += 1;
         let mut eps_optimal = true;
@@ -1596,6 +1674,14 @@ impl McmfCs2 {
         eps_optimal
     }
 
+    /// Computes optimal dual prices (node potentials) for the final solution.
+    ///
+    /// Structurally similar to [`price_refine`](Self::price_refine) but operates
+    /// on *all* arcs (including suspended) and uses exact reduced costs (not
+    /// scaled by epsilon). Performs a DFS to topologically sort the residual
+    /// graph, computes longest-path distances via a reverse-topological bucket
+    /// scan, and adjusts prices accordingly. Aborts early if a negative-cost
+    /// residual cycle is detected (should not happen for a correct solution).
     fn compute_prices(&mut self) {
         self.n_prefine += 1;
         // Whether the graph is cycle free
@@ -1748,6 +1834,14 @@ impl McmfCs2 {
         }
     }
 
+    /// Suspends arcs whose reduced cost exceeds the `cut_off` threshold
+    /// (Goldberg §2.3: *speculative arc fixing*).
+    ///
+    /// An arc is suspended if its reduced cost is large enough that the
+    /// push-relabel method will not change its flow before epsilon decreases
+    /// further. Suspended arcs are moved before `first` in the adjacency list
+    /// via [`exchange`](Self::exchange), so they are skipped by relabel and
+    /// discharge. They can later be recovered by [`price_in`](Self::price_in).
     fn price_out(&mut self) {
         let n_cut_off = -self.cut_off;
 
@@ -1875,6 +1969,7 @@ impl McmfCs2 {
         println!("c");
     }
 
+    /// Prints the graph structure to stdout (for debugging).
     fn print_graph(&self) {
         println!("\nGraph: {}", self.n);
         for i in 0..self.n {
@@ -1895,6 +1990,13 @@ impl McmfCs2 {
         }
     }
 
+    /// Post-processing: unscales costs and prices back to original units,
+    /// computes the objective cost, and optionally computes dual prices.
+    ///
+    /// During [`cs2_initialize`](Self::cs2_initialize), all arc costs were
+    /// multiplied by `dn` for integer epsilon arithmetic. This method divides
+    /// them back, computes `sum(cost * flow)` over forward arcs, and divides
+    /// node prices by `dn`.
     fn finishup(&mut self, objective_cost: &mut f64, comp_duals: bool) {
         // remove zero-cost cycle markers
         if self.no_zero_cycles {
@@ -1931,6 +2033,20 @@ impl McmfCs2 {
         *objective_cost = obj_internal;
     }
 
+    /// Main loop of the successive approximation algorithm
+    /// (Goldberg §1, Fig 1: *Min-Cost*).
+    ///
+    /// Starting from `epsilon = max_cost * dn`, repeatedly:
+    /// 1. Calls [`refine`](Self::refine) to convert the current pseudoflow
+    ///    into an epsilon-optimal flow.
+    /// 2. Calls [`price_out`](Self::price_out) to suspend arcs with large
+    ///    reduced costs.
+    /// 3. Reduces epsilon by the scale factor.
+    /// 4. Attempts [`price_refine`](Self::price_refine) to skip full refine
+    ///    iterations when prices alone can establish optimality at the new
+    ///    epsilon. Falls back to refine if price_refine detects a cycle.
+    ///
+    /// Terminates when `epsilon < 1`, at which point the flow is optimal.
     #[inline(never)]
     fn cs2(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
         let mut scaling_done = false;
