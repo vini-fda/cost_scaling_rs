@@ -27,6 +27,8 @@ It aims to match the performance of the C implementation using 100% native Rust,
 - `benches/` - Criterion benchmarks.
 - `examples/gen_goto.rs` - GOTO problem generator CLI.
 - `docs/` - Documentation.
+- `OPTIMIZATION.md` - Documentation on the optimization process.
+  - New sections should be added as you learn
 
 # Context and how to work on this repo
 
@@ -36,6 +38,8 @@ with extremely well-documented and battle-tested code. This will involve:
 - deep knowledge of graph algorithms
 - deep knowledge of Rust patterns, such as typestate, strong typing, RAII and so on
 - deep knowledge of unsafe Rust, and how to make safe wrappers around unsafe APIs
+- benchmarking and comparing with the C code's performance in a measurable, objective way
+- formulating hypotheses, testing, iterating on them then documenting the process
 
 The current state is that:
 
