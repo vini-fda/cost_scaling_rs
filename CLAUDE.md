@@ -31,11 +31,19 @@ It aims to match the performance of the C implementation using 100% native Rust,
 # Context and how to work on this repo
 
 This project's goal is for the Rust implementation to match (or improve) the C's code performance,
-with extremely well-documented and battle-tested code.
+with extremely well-documented and battle-tested code. This will involve:
+
+- deep knowledge of graph algorithms
+- deep knowledge of Rust patterns, such as typestate, strong typing, RAII and so on
+- deep knowledge of unsafe Rust, and how to make safe wrappers around unsafe APIs
 
 The current state is that:
 
 - the performance does not match the C performance. 
 - functions, types and variables in the Rust code are poorly named or poorly documented, especially methods in `McmfCs2`.
+- some datatypes and data structures are not isolated into their own high-performance APIs.
+  - this makes e.g. testing a "Bucket" implementation in isolation difficult
 
 First, read README.md to get an overview. Then, read OPTIMIZATION.md to get the current state of optimization.
+
+The transcribed Goldberg paper in `docs/main.typ` gives a thorough explanation of the reasoning behind concepts, decisions, heuristics and optimizations of the original code. It should be seen as a guide.
