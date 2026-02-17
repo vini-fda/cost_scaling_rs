@@ -53,12 +53,9 @@ check_dep hyperfine "Install: cargo install hyperfine  OR  brew install hyperfin
 echo "==> Building Rust binary (release, LTO)..."
 cargo build --release --quiet
 
-echo "==> Building C binary (gcc -O3)..."
+echo "==> Building C binary (release, -O3 -march=native -flto)..."
 make -C cs2 clean --quiet 2>/dev/null || true
-make -C cs2 cs2.exe \
-    CCOMP=gcc \
-    "CFLAGS=-O3 -DNDEBUG -DPRINT_ANS -DCOMP_DUALS" \
-    --quiet 2>/dev/null
+make -C cs2 release --quiet 2>/dev/null
 
 if [[ ! -x "$RUST_BIN" ]]; then
     echo "Error: Rust binary not found at $RUST_BIN" >&2
