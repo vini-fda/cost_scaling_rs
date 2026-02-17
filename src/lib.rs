@@ -122,6 +122,16 @@ struct BucketArray {
 }
 
 impl BucketArray {
+    /// Creates an empty bucket array with no allocations.
+    fn empty() -> Self {
+        BucketArray {
+            p_first: Vec::new(),
+            b_next: Vec::new(),
+            b_prev: Vec::new(),
+            rank: Vec::new(),
+        }
+    }
+
     /// Creates a new bucket array with `num_buckets` buckets and capacity for
     /// `num_nodes` nodes.
     fn new(num_buckets: usize, num_nodes: usize) -> Self {
@@ -437,7 +447,7 @@ impl McmfCs2 {
             arcs: Vec::new(),
             sentinel_arc: NONE,
 
-            buckets: BucketArray::new(0, 0),
+            buckets: BucketArray::empty(),
             linf: 0,
             time_for_price_in: 0,
 
