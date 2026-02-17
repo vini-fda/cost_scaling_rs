@@ -480,12 +480,15 @@ impl McmfCs2 {
     // -----------------------------------------------------------------------
 
     /// Push `df` units of flow from node `i` to node `j` along arc `a`.
+    ///
+    /// This is the "push" in the push-relabel method.
     fn increase_flow(&mut self, i: NodeIndex, j: NodeIndex, a: ArcIndex, df: i64) {
         self.nodes[i].excess -= df;
         self.nodes[j].excess += df;
         self.arcs[a].res_capacity -= df;
         let sister = self.arcs[a].sister;
         self.arcs[sister].res_capacity += df;
+        self.n_push += 1;
     }
 
     /// Returns true when it is time for a price update.
@@ -1162,14 +1165,12 @@ impl McmfCs2 {
                     self.n_src += 1;
                 }
                 self.increase_flow(i, j, a, df);
-                self.n_push += 1;
                 if self.out_of_excess_q(j) {
                     self.insert_to_excess_q(j);
                 }
             } else {
                 let df = self.nodes[i].excess.min(self.arcs[a].res_capacity);
                 self.increase_flow(i, j, a, df);
-                self.n_push += 1;
                 if self.nodes[j].excess >= 0 {
                     if self.nodes[j].excess > 0 {
                         self.n_src += 1;
