@@ -38,8 +38,25 @@ Criterion's own `change` measurements (comparing against its saved baseline from
 5. All bucket operations now go through `BucketArray` methods (`insert`, `remove`, `get`,
    `nonempty`, `reset`).
 
+## Rust vs C Comparison (hyperfine, `bench-compare.sh`)
+
+End-to-end timing on larger GOTO problems, comparing the Rust binary (bucket-array branch)
+against the reference C implementation (gcc -O3 -march=native -flto).
+
+| Problem             | Rust      | C         | C faster by |
+|---------------------|-----------|-----------|-------------|
+| 500n / 3K arcs      | 4.5 ms    | 4.3 ms    | 1.05x       |
+| 2,000n / 12K arcs   | 34.0 ms   | 30.7 ms   | 1.11x       |
+| 5,000n / 30K arcs   | 104.4 ms  | 94.1 ms   | 1.11x       |
+| 10,000n / 60K arcs  | 284.3 ms  | 251.3 ms  | 1.13x       |
+
+The gap is consistent at ~11% for medium/large problems and narrows to ~5% at small sizes where
+startup overhead dominates. This is a meaningful improvement over the pre-refactor state and
+brings the Rust implementation closer to the C baseline.
+
 ## Conclusion
 
 The refactoring delivers a consistent ~3–5% speedup with cleaner code separation. The 64-byte
 Node size likely eliminates the `imul` instruction in relabel's inner loop (replaced by a shift),
-confirming the hypothesis from `OPTIMIZATION.md`. Ready to merge to master.
+confirming the hypothesis from `OPTIMIZATION.md`. Rust is now within 5–13% of C across all
+tested problem sizes.
