@@ -1,6 +1,13 @@
 #import "@preview/lovelace:0.3.0": *
 #import "@preview/showybox:2.0.4": showybox
 #set heading(numbering: "1.")
+
+// This Typst document serves as documentation for the cost_scaling_rs project.
+//
+// Most of the content here is a direct typst translation of
+// the original paper:
+// Goldberg, Andrew V. "An efficient implementation of a scaling minimum-cost flow algorithm." Journal of algorithms 22.1 (1997): 1-29.
+
 = Core Definitions for the Minimum-Cost Flow Problem
 
 == Network Model
