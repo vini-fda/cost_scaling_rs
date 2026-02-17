@@ -88,12 +88,8 @@ struct Node {
     price: Price,
     /// Next node in push-queue.
     q_next: NodeIndex,
-    /// Next node in bucket-list.
-    b_next: NodeIndex,
-    /// Previous node in bucket-list.
-    b_prev: NodeIndex,
-    /// Bucket number.
-    rank: i64,
+    /// Parent node in DFS traversal (used by price_refine and compute_prices).
+    dfs_parent: NodeIndex,
     /// DFS visit color (White/Grey/Black) used in price_refine and compute_prices.
     inp: Color,
 }
@@ -111,11 +107,73 @@ struct Arc {
     sister: ArcIndex,
 }
 
-/// A bucket used for node ordering during price updates.
-#[derive(Clone)]
-struct Bucket {
-    /// First node in the bucket.
-    p_first: NodeIndex,
+/// Dial-style bucket array for priority-queue operations in price_update and
+/// price_refine. Stores per-node linked-list pointers and rank in parallel
+/// arrays, separate from the `Node` struct.
+struct BucketArray {
+    /// Head of each bucket's doubly-linked list (`NONE` if empty).
+    p_first: Vec<NodeIndex>,
+    /// Next node in the same bucket (`NONE` if last).
+    b_next: Vec<NodeIndex>,
+    /// Previous node in the same bucket.
+    b_prev: Vec<NodeIndex>,
+    /// Bucket index this node belongs to, or -1 if settled.
+    rank: Vec<i64>,
+}
+
+impl BucketArray {
+    /// Creates a new bucket array with `num_buckets` buckets and capacity for
+    /// `num_nodes` nodes.
+    fn new(num_buckets: usize, num_nodes: usize) -> Self {
+        BucketArray {
+            p_first: vec![NONE; num_buckets],
+            b_next: vec![NONE; num_nodes],
+            b_prev: vec![NONE; num_nodes],
+            rank: vec![0; num_nodes],
+        }
+    }
+
+    /// Returns true if bucket `b` is non-empty.
+    fn nonempty(&self, b: BucketIndex) -> bool {
+        self.p_first[b] != NONE
+    }
+
+    /// Reset bucket `b` to empty.
+    #[allow(dead_code)]
+    fn reset(&mut self, b: BucketIndex) {
+        self.p_first[b] = NONE;
+    }
+
+    /// Insert node `i` into bucket `b`.
+    fn insert(&mut self, i: NodeIndex, b: BucketIndex) {
+        let old_first = self.p_first[b];
+        self.b_next[i] = old_first;
+        if old_first != NONE {
+            self.b_prev[old_first] = i;
+        }
+        self.p_first[b] = i;
+    }
+
+    /// Pop the first node from bucket `b`.
+    fn get(&mut self, b: BucketIndex) -> NodeIndex {
+        let i = self.p_first[b];
+        self.p_first[b] = self.b_next[i];
+        i
+    }
+
+    /// Remove node `i` from bucket `b`.
+    fn remove(&mut self, i: NodeIndex, b: BucketIndex) {
+        if i == self.p_first[b] {
+            self.p_first[b] = self.b_next[i];
+        } else {
+            let prev = self.b_prev[i];
+            let next = self.b_next[i];
+            self.b_next[prev] = next;
+            if next != NONE {
+                self.b_prev[next] = prev;
+            }
+        }
+    }
 }
 
 /// The update flag.
@@ -211,11 +269,9 @@ pub struct McmfCs2 {
     /// Sentinel arc index (one past last real arc).
     sentinel_arc: ArcIndex,
 
-    /// Array of buckets.
-    buckets: Vec<Bucket>,
-    /// Last bucket index.
-    l_bucket: BucketIndex,
-    /// Number of l_bucket + 1.
+    /// Dial-style bucket array for price_update / price_refine.
+    buckets: BucketArray,
+    /// Number of buckets (also used as the "infinity" rank).
     linf: usize,
     time_for_price_in: i32,
 
@@ -247,10 +303,8 @@ pub struct McmfCs2 {
     /// Maximal number of cycles cancelled during price refine.
     snc_max: i32,
 
-    /// Index of dummy node in `nodes` (address of d_node).
+    /// Index of dummy node in `nodes` (used as excess queue marker).
     dummy_node: NodeIndex,
-    /// dnode index used for bucket sentinel.
-    dnode: NodeIndex,
 
     /// Number of relabels from last price update.
     n_rel: u64,
@@ -325,9 +379,7 @@ impl Default for Node {
             excess: 0,
             price: 0,
             q_next: NONE,
-            b_next: NONE,
-            b_prev: NONE,
-            rank: 0,
+            dfs_parent: NONE,
             inp: Color::White,
         }
     }
@@ -341,12 +393,6 @@ impl Default for Arc {
             head: NONE,
             sister: NONE,
         }
-    }
-}
-
-impl Default for Bucket {
-    fn default() -> Self {
-        Bucket { p_first: NONE }
     }
 }
 
@@ -391,8 +437,7 @@ impl McmfCs2 {
             arcs: Vec::new(),
             sentinel_arc: NONE,
 
-            buckets: Vec::new(),
-            l_bucket: 0,
+            buckets: BucketArray::new(0, 0),
             linf: 0,
             time_for_price_in: 0,
 
@@ -411,7 +456,6 @@ impl McmfCs2 {
             snc_max: 0,
 
             dummy_node: NONE,
-            dnode: NONE,
 
             n_rel: 0,
             n_ref: 0,
@@ -570,51 +614,6 @@ impl McmfCs2 {
     /// Pop the front node from the stack-queue. Returns the popped node index.
     fn stackq_pop(&mut self) -> NodeIndex {
         self.remove_from_excess_q()
-    }
-
-    // -----------------------------------------------------------------------
-    // Bucket utilities
-    // -----------------------------------------------------------------------
-
-    /// Reset bucket `b` to empty (sentinel).
-    fn reset_bucket(&mut self, b: BucketIndex) {
-        self.buckets[b].p_first = self.dnode;
-    }
-
-    /// Returns true if bucket `b` is non-empty.
-    fn nonempty_bucket(&self, b: BucketIndex) -> bool {
-        self.buckets[b].p_first != self.dnode
-    }
-
-    /// Insert node `i` into bucket `b`.
-    fn insert_to_bucket(&mut self, i: NodeIndex, b: BucketIndex) {
-        let old_first = self.buckets[b].p_first;
-        self.nodes[i].b_next = old_first;
-        if old_first != self.dnode {
-            self.nodes[old_first].b_prev = i;
-        }
-        self.buckets[b].p_first = i;
-    }
-
-    /// Get (pop) the first node from bucket `b`. Returns the node index.
-    fn get_from_bucket(&mut self, b: BucketIndex) -> NodeIndex {
-        let i = self.buckets[b].p_first;
-        self.buckets[b].p_first = self.nodes[i].b_next;
-        i
-    }
-
-    /// Remove node `i` from bucket `b`.
-    fn remove_from_bucket(&mut self, i: NodeIndex, b: BucketIndex) {
-        if i == self.buckets[b].p_first {
-            self.buckets[b].p_first = self.nodes[i].b_next;
-        } else {
-            let prev = self.nodes[i].b_prev;
-            let next = self.nodes[i].b_next;
-            self.nodes[prev].b_next = next;
-            if next != self.dnode {
-                self.nodes[next].b_prev = prev;
-            }
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -945,16 +944,7 @@ impl McmfCs2 {
 
         self.linf = (self.dn as f64 * self.f_scale.ceil() + 2.0) as usize;
 
-        self.buckets = vec![Bucket::default(); self.linf];
-        self.l_bucket = self.linf;
-
-        // dnode: extra node used as bucket sentinel
-        self.dnode = self.nodes.len();
-        self.nodes.push(Node::default());
-
-        for b in 0..self.l_bucket {
-            self.reset_bucket(b);
-        }
+        self.buckets = BucketArray::new(self.linf, self.n + 2);
 
         self.epsilon = self.mmc;
         if self.epsilon < 1 {
@@ -993,7 +983,7 @@ impl McmfCs2 {
     /// `rank * epsilon` and its rank is set to −1 (settled).
     fn up_node_scan(&mut self, i: NodeIndex) {
         self.n_scan += 1;
-        let i_rank = self.nodes[i].rank;
+        let i_rank = self.buckets.rank[i];
         let a_start = self.nodes[i].first;
         let a_stop = self.nodes[i + 1].suspended;
 
@@ -1001,7 +991,7 @@ impl McmfCs2 {
             let ra = self.arcs[a].sister;
             if self.arcs[ra].res_capacity > 0 {
                 let j = self.arcs[a].head;
-                let j_rank = self.nodes[j].rank;
+                let j_rank = self.buckets.rank[j];
                 if j_rank > i_rank {
                     let rc = self.nodes[j].price + self.arcs[ra].cost - self.nodes[i].price;
                     let j_new_rank = if rc < 0 {
@@ -1015,21 +1005,21 @@ impl McmfCs2 {
                         }
                     };
                     if j_rank > j_new_rank {
-                        self.nodes[j].rank = j_new_rank;
+                        self.buckets.rank[j] = j_new_rank;
                         self.nodes[j].current = ra;
                         if j_rank < self.linf as i64 {
                             let b_old = j_rank as usize;
-                            self.remove_from_bucket(j, b_old);
+                            self.buckets.remove(j, b_old);
                         }
                         let b_new = j_new_rank as usize;
-                        self.insert_to_bucket(j, b_new);
+                        self.buckets.insert(j, b_new);
                     }
                 }
             }
         }
 
         self.nodes[i].price -= i_rank * self.epsilon;
-        self.nodes[i].rank = -1;
+        self.buckets.rank[i] = -1;
     }
 
     /// Globally recomputes node prices using a Dijkstra-like bucket scan
@@ -1049,10 +1039,10 @@ impl McmfCs2 {
 
         for i in 0..self.sentinel_node {
             if self.nodes[i].excess < 0 {
-                self.insert_to_bucket(i, 0);
-                self.nodes[i].rank = 0;
+                self.buckets.insert(i, 0);
+                self.buckets.rank[i] = 0;
             } else {
-                self.nodes[i].rank = self.linf as i64;
+                self.buckets.rank[i] = self.linf as i64;
             }
         }
 
@@ -1062,9 +1052,9 @@ impl McmfCs2 {
         }
 
         let mut b = 0usize;
-        while b < self.l_bucket {
-            while self.nonempty_bucket(b) {
-                let i = self.get_from_bucket(b);
+        while b < self.linf {
+            while self.buckets.nonempty(b) {
+                let i = self.buckets.get(b);
                 self.up_node_scan(i);
                 if self.nodes[i].excess > 0 {
                     remain -= self.nodes[i].excess;
@@ -1086,10 +1076,10 @@ impl McmfCs2 {
         let dp = (b as i64) * self.epsilon;
 
         for i in 0..self.sentinel_node {
-            if self.nodes[i].rank >= 0 {
-                if self.nodes[i].rank < self.linf as i64 {
-                    let bucket_idx = self.nodes[i].rank as usize;
-                    self.remove_from_bucket(i, bucket_idx);
+            if self.buckets.rank[i] >= 0 {
+                if self.buckets.rank[i] < self.linf as i64 {
+                    let bucket_idx = self.buckets.rank[i] as usize;
+                    self.buckets.remove(i, bucket_idx);
                 }
                 if self.nodes[i].price > self.price_min {
                     self.nodes[i].price -= dp;
@@ -1453,7 +1443,7 @@ impl McmfCs2 {
         loop {
             let mut nnc: i32 = 0;
             for i in 0..self.sentinel_node {
-                self.nodes[i].rank = 0;
+                self.buckets.rank[i] = 0;
                 self.nodes[i].inp = Color::White;
                 self.nodes[i].current = self.nodes[i].first;
             }
@@ -1463,7 +1453,7 @@ impl McmfCs2 {
                 if self.nodes[root].inp == Color::Black {
                     continue;
                 }
-                self.nodes[root].b_next = NONE;
+                self.nodes[root].dfs_parent = NONE;
                 let mut i = root;
 
                 // depth first search
@@ -1481,7 +1471,7 @@ impl McmfCs2 {
                                 if self.nodes[j].inp == Color::White {
                                     // step forward
                                     self.nodes[i].current = a;
-                                    self.nodes[j].b_next = i;
+                                    self.nodes[j].dfs_parent = i;
                                     i = j;
                                     stepped = true;
                                     break;
@@ -1505,7 +1495,7 @@ impl McmfCs2 {
                                         if ir == j {
                                             break;
                                         }
-                                        ir = self.nodes[ir].b_next;
+                                        ir = self.nodes[ir].dfs_parent;
                                     }
 
                                     // push flow around cycle
@@ -1517,14 +1507,14 @@ impl McmfCs2 {
                                         if ir == j {
                                             break;
                                         }
-                                        ir = self.nodes[ir].b_next;
+                                        ir = self.nodes[ir].dfs_parent;
                                     }
 
                                     if is != i {
                                         ir = i;
                                         while ir != is {
                                             self.nodes[ir].inp = Color::White;
-                                            ir = self.nodes[ir].b_next;
+                                            ir = self.nodes[ir].dfs_parent;
                                         }
                                         i = is;
                                         stepped = true;
@@ -1544,7 +1534,7 @@ impl McmfCs2 {
                     // step back
                     self.nodes[i].inp = Color::Black;
                     self.n_prscan1 += 1;
-                    let j = self.nodes[i].b_next;
+                    let j = self.nodes[i].dfs_parent;
                     self.stackq_push(i);
                     if j == NONE {
                         break 'dfs;
@@ -1567,7 +1557,7 @@ impl McmfCs2 {
             while self.nonempty_stackq() {
                 self.n_prscan2 += 1;
                 let i = self.stackq_pop();
-                let i_rank = self.nodes[i].rank;
+                let i_rank = self.buckets.rank[i];
                 let a_start = self.nodes[i].first;
                 let a_stop = self.nodes[i + 1].suspended;
                 for a in a_start..a_stop {
@@ -1577,8 +1567,8 @@ impl McmfCs2 {
                         if rc < 0 {
                             let dr = (-rc as f64 - 0.5) / self.epsilon as f64;
                             let j_rank = dr as i64 + i_rank;
-                            if j_rank < self.linf as i64 && j_rank > self.nodes[j].rank {
-                                self.nodes[j].rank = j_rank;
+                            if j_rank < self.linf as i64 && j_rank > self.buckets.rank[j] {
+                                self.buckets.rank[j] = j_rank;
                             }
                         }
                     }
@@ -1588,7 +1578,7 @@ impl McmfCs2 {
                         bmax = i_rank as usize;
                     }
                     let b = i_rank as usize;
-                    self.insert_to_bucket(i, b);
+                    self.buckets.insert(i, b);
                 }
             }
 
@@ -1601,8 +1591,8 @@ impl McmfCs2 {
                 let i_rank = b as i64;
                 let dp = i_rank * self.epsilon;
 
-                while self.nonempty_bucket(b) {
-                    let i = self.get_from_bucket(b);
+                while self.buckets.nonempty(b) {
+                    let i = self.buckets.get(b);
                     self.n_prscan += 1;
 
                     let a_start = self.nodes[i].first;
@@ -1610,7 +1600,7 @@ impl McmfCs2 {
                     for a in a_start..a_stop {
                         if self.arcs[a].res_capacity > 0 {
                             let j = self.arcs[a].head;
-                            let j_rank = self.nodes[j].rank;
+                            let j_rank = self.buckets.rank[j];
                             if j_rank < i_rank {
                                 let rc =
                                     self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
@@ -1626,13 +1616,13 @@ impl McmfCs2 {
                                 };
                                 if j_rank < j_new_rank {
                                     if eps_optimal {
-                                        self.nodes[j].rank = j_new_rank;
+                                        self.buckets.rank[j] = j_new_rank;
                                         if j_rank > 0 {
                                             let b_old = j_rank as usize;
-                                            self.remove_from_bucket(j, b_old);
+                                            self.buckets.remove(j, b_old);
                                         }
                                         let b_new = j_new_rank as usize;
-                                        self.insert_to_bucket(j, b_new);
+                                        self.buckets.insert(j, b_new);
                                     } else {
                                         let df = self.arcs[a].res_capacity;
                                         let j = self.arcs[a].head;
@@ -1690,7 +1680,7 @@ impl McmfCs2 {
 
         loop {
             for i in 0..self.sentinel_node {
-                self.nodes[i].rank = 0;
+                self.buckets.rank[i] = 0;
                 self.nodes[i].inp = Color::White;
                 self.nodes[i].current = self.nodes[i].first;
             }
@@ -1700,7 +1690,7 @@ impl McmfCs2 {
                 if self.nodes[root].inp == Color::Black {
                     continue;
                 }
-                self.nodes[root].b_next = NONE;
+                self.nodes[root].dfs_parent = NONE;
                 let mut i = root;
 
                 'dfs: loop {
@@ -1716,7 +1706,7 @@ impl McmfCs2 {
                             if rc < 0 {
                                 if self.nodes[j].inp == Color::White {
                                     self.nodes[i].current = a;
-                                    self.nodes[j].b_next = i;
+                                    self.nodes[j].dfs_parent = i;
                                     i = j;
                                     stepped = true;
                                     break;
@@ -1735,7 +1725,7 @@ impl McmfCs2 {
 
                     self.nodes[i].inp = Color::Black;
                     self.n_prscan1 += 1;
-                    let j = self.nodes[i].b_next;
+                    let j = self.nodes[i].dfs_parent;
                     self.stackq_push(i);
                     if j == NONE {
                         break 'dfs;
@@ -1753,7 +1743,7 @@ impl McmfCs2 {
             while self.nonempty_stackq() {
                 self.n_prscan2 += 1;
                 let i = self.stackq_pop();
-                let i_rank = self.nodes[i].rank;
+                let i_rank = self.buckets.rank[i];
                 let a_start = self.nodes[i].suspended;
                 let a_stop = self.nodes[i + 1].suspended;
                 for a in a_start..a_stop {
@@ -1763,8 +1753,8 @@ impl McmfCs2 {
                         if rc < 0 {
                             let dr = -rc;
                             let j_rank = dr + i_rank;
-                            if j_rank < self.linf as i64 && j_rank > self.nodes[j].rank {
-                                self.nodes[j].rank = j_rank;
+                            if j_rank < self.linf as i64 && j_rank > self.buckets.rank[j] {
+                                self.buckets.rank[j] = j_rank;
                             }
                         }
                     }
@@ -1774,7 +1764,7 @@ impl McmfCs2 {
                         bmax = i_rank as usize;
                     }
                     let b = i_rank as usize;
-                    self.insert_to_bucket(i, b);
+                    self.buckets.insert(i, b);
                 }
             }
 
@@ -1787,8 +1777,8 @@ impl McmfCs2 {
                 let i_rank = b as i64;
                 let dp = i_rank;
 
-                while self.nonempty_bucket(b) {
-                    let i = self.get_from_bucket(b);
+                while self.buckets.nonempty(b) {
+                    let i = self.buckets.get(b);
                     self.n_prscan += 1;
 
                     let a_start = self.nodes[i].suspended;
@@ -1796,7 +1786,7 @@ impl McmfCs2 {
                     for a in a_start..a_stop {
                         if self.arcs[a].res_capacity > 0 {
                             let j = self.arcs[a].head;
-                            let j_rank = self.nodes[j].rank;
+                            let j_rank = self.buckets.rank[j];
                             if j_rank < i_rank {
                                 let rc =
                                     self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
@@ -1811,13 +1801,13 @@ impl McmfCs2 {
                                     }
                                 };
                                 if j_rank < j_new_rank && cycle_free {
-                                    self.nodes[j].rank = j_new_rank;
+                                    self.buckets.rank[j] = j_new_rank;
                                     if j_rank > 0 {
                                         let b_old = j_rank as usize;
-                                        self.remove_from_bucket(j, b_old);
+                                        self.buckets.remove(j, b_old);
                                     }
                                     let b_new = j_new_rank as usize;
-                                    self.insert_to_bucket(j, b_new);
+                                    self.buckets.insert(j, b_new);
                                 }
                             }
                         }
