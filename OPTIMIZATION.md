@@ -134,3 +134,68 @@ Two key differences:
 **Result:** Tests pass on small problems (up to 2000 nodes), but the binary **hangs on problems with ≥5000 nodes**. The cost-scaling algorithm multiplies costs by `n` during initialization and accumulates prices as multiples of `epsilon = n * max_cost`. For 5000+ nodes these intermediate values exceed `i32::MAX` (~2.1 billion), and in release mode i32 overflow wraps silently, corrupting algorithm invariants and causing infinite loops in `price_update`.
 
 **Conclusion:** `Price` and `Excess` must remain `i64` — the original C code uses `long long` for exactly this reason. Achieving 64-byte nodes would require removing a field (e.g. `b_prev`, converting doubly-linked bucket lists to singly-linked), which risks degrading `remove_from_bucket` from O(1) to O(bucket_size). Not pursued.
+
+## BucketArray extraction: Node 80 → 64 bytes (committed)
+
+**Hypothesis:** The `b_next`, `b_prev`, and `rank` fields in `Node` (24 bytes) are only used in `price_update` and `price_refine`, not in the hottest loops (`relabel`, `discharge`). Moving them to a separate `BucketArray` struct (parallel arrays) shrinks `Node` from 80 to 64 bytes — a power of 2 — without touching any numeric types.
+
+**Change:** Introduced `BucketArray { p_first, b_next, b_prev, rank }` as a standalone struct. The bucket-list head `p_first` was already a `Vec` on `McmfCs2`; the per-node fields moved out of `Node`. `sizeof(Node)` went from 80 to 64 bytes.
+
+**Result:**
+
+| Problem | Rust (before) | Rust (after) | C | Ratio (after) |
+|---------|--------------|--------------|---|---------------|
+| 500n    | 6.8ms        | ~4.6ms       | ~4.3ms | 1.07x |
+| 2000n   | 40.5ms       | ~33.6ms      | ~30.4ms | 1.11x |
+| 5000n   | 116.3ms      | ~103.8ms     | ~93.6ms | 1.11x |
+| 10000n  | 314.3ms      | ~281.1ms     | ~250.5ms | 1.12x |
+
+Absolute improvement ~10% across all sizes. The gap relative to C remained at ~11–12%.
+
+**Why:** Denser nodes improve cache utilization: more nodes fit per cache line in the `price_update` sweep and the `discharge` / `relabel` node accesses. The power-of-2 stride was a secondary gain (confirmed by assembly update below).
+
+## target-cpu=native (committed)
+
+**Hypothesis:** The bench-compare script passes `-march=native -flto` to GCC but Rust builds had no equivalent. Adding `-C target-cpu=native` via `.cargo/config.toml` levels the playing field and may enable LLVM to use Apple Silicon-specific instructions.
+
+**Change:** Added `.cargo/config.toml`:
+```toml
+[build]
+rustflags = ["-C", "target-cpu=native"]
+```
+
+**Result:** No measurable improvement. Ratios at 2000n–10000n unchanged (~1.10–1.12x). Apple Silicon's AArch64 ISA has few optional extensions that affect integer code; the default `aarch64-apple-darwin` target already enables the relevant ones. The bottleneck is memory latency, not instruction selection.
+
+## Updated assembly analysis (Node = 64 bytes, target-cpu=native)
+
+Regenerated AArch64 assembly for `relabel`'s inner loops after the BucketArray extraction:
+
+**Rust** (both scanning loops in `relabel`, representative loop body):
+```asm
+ldur  x9, [x2, #-16]       ; arcs[a].res_capacity  (x2 = &arc.head)
+cmp   x9, #0
+b.le  <next>               ; skip non-positive residual
+ldr   x9, [x2]             ; arcs[a].head  (index)
+add   x9, x13, x9, lsl #6  ; nodes_base + head * 64  ← lsl #6, NOT madd
+ldr   x9, [x9, #32]        ; nodes[head].price
+ldur  x4, [x2, #-8]        ; arcs[a].cost
+sub   x9, x9, x4           ; dp = price - cost
+```
+
+The `madd` (multiply-add) from the 80-byte era is gone. The stride multiplication is now `lsl #6` folded into the addressing of a standard `add` — a single 1-cycle instruction on Apple Silicon vs the 3-cycle `madd`.
+
+**Remaining structural difference vs C:**
+
+C's two-step chain:
+```
+load head-pointer  →  load head->price     (2 dependent loads)
+```
+
+Rust's three-step chain:
+```
+load head-index  →  add+lsl #6 (1 cy)  →  load nodes[head].price     (2 dependent loads + 1 arithmetic)
+```
+
+The extra `add+lsl` step sits on the critical dependency path. With an L1 hit (~4 cy), the arithmetic adds ~25% extra latency to that chain segment. With an L2 miss the arithmetic is hidden in the miss latency and the difference shrinks — which explains why the gap narrows at larger problem sizes (more cache pressure, longer miss latencies dominate).
+
+**`ldp` not emitted:** `cost` (at `[x2, #-8]`) and `head` (at `[x2]`) are adjacent in memory, so a `ldp x4, x9, [x2, #-8]` would load both in one instruction (matching GCC's behavior on the C struct). LLVM does not emit it because the two values are consumed at different points in the loop body and register pressure differs. This is a missed optimization in LLVM's AArch64 backend for this pattern.
