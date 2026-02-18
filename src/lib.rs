@@ -132,18 +132,8 @@ enum Color {
 
 /// A node in the min-cost flow network.
 ///
-/// Layout (32 bytes, power-of-2 stride → `lsl #5` addressing on AArch64):
-/// ```text
-/// offset  0: excess     (i64, 8 bytes)
-/// offset  8: price      (i64, 8 bytes)
-/// offset 16: first      (ArcIdx/u32, 4 bytes)
-/// offset 20: current    (ArcIdx/u32, 4 bytes)
-/// offset 24: suspended  (ArcIdx/u32, 4 bytes)
-/// offset 28: q_next     (NodeIdx/u32, 4 bytes)
-/// ```
-///
-/// The `dfs_parent` and `inp` (Color) fields — used only in the cold
-/// `price_refine` / `compute_prices` paths — are stored in parallel arrays
+/// The `dfs_parent` and `inp` (Color) fields, used only in the cold
+/// `price_refine` / `compute_prices` paths, are stored in parallel arrays
 /// on [`McmfCs2`] to keep this struct at 32 bytes.
 #[derive(Clone)]
 struct Node {
@@ -162,14 +152,6 @@ struct Node {
 }
 
 /// An arc in the min-cost flow network.
-///
-/// Layout (24 bytes):
-/// ```text
-/// offset  0: res_capacity (i64, 8 bytes)
-/// offset  8: cost         (i64, 8 bytes)
-/// offset 16: head         (NodeIdx/u32, 4 bytes)
-/// offset 20: sister       (ArcIdx/u32,  4 bytes)
-/// ```
 #[derive(Clone)]
 struct Arc {
     /// Residual capacity.
