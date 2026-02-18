@@ -967,6 +967,14 @@ impl McmfCs2 {
     ///    [`price_refine`](Self::price_refine), sized to `O(n * scale_factor)`.
     fn cs2_initialize(&mut self) {
         self.f_scale = SCALE_DEFAULT;
+        assert!(
+            self.n <= u32::MAX as usize,
+            "Number of nodes exceeds u32::MAX"
+        );
+        assert!(
+            self.m <= u32::MAX as usize,
+            "Number of arcs exceeds u32::MAX"
+        );
         self.sentinel_node = NodeIdx(self.n as u32);
         self.sentinel_arc = ArcIdx(self.m as u32);
 
