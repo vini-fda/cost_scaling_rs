@@ -110,6 +110,8 @@ struct Arc {
 /// Dial-style bucket array for priority-queue operations in price_update and
 /// price_refine. Stores per-node linked-list pointers and rank in parallel
 /// arrays, separate from the `Node` struct.
+///
+/// Note: "Dial" as in Robert B. Dial's "Algorithm 360: Shortest-path forest with topological ordering"
 struct BucketArray {
     /// Head of each bucket's doubly-linked list (`NONE` if empty).
     p_first: Vec<NodeIndex>,
