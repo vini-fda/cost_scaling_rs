@@ -3,6 +3,11 @@
 This project (cost_scaling_rs) is a Rust translation of the original CS2 min-cost maximum-flow cost scaling algorithm.
 It aims to match the performance of the C implementation using 100% native Rust, with good documentation and usage of Rust idioms.
 
+# Commit rules
+- The master branch is protected
+- Changes must be made in new branches, then a PR must be opened to merge to master
+- CI checks must pass before merging (`.github/workflows/rust.yml`)
+
 # Build & Test Commands
 - Build: `cargo build`
 - Test: `cargo test`
