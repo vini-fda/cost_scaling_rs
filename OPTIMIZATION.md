@@ -241,9 +241,9 @@ latency is hidden behind the ~50+ cy miss penalty. The benefit is most visible a
 ```asm
 ldr   x9, [x2]             ; arcs[a].head  (index, u32)
 add   x9, x13, x9, lsl #5  ; nodes_base + head * 32  ← lsl #5 (was lsl #6)
-ldr   x9, [x9, #16]        ; nodes[head].price  (offset 16, was 32)
+ldr   x9, [x9, #8]         ; nodes[head].price  (offset 8, was 32)
 ```
 
-The price field is now at offset 16 instead of 32 (since Node is 32 bytes and
+The price field is now at offset 8 instead of 32 (since Node is 32 bytes and
 `excess` + `price` are still the first two fields). The stride multiply is
 `lsl #5` vs the previous `lsl #6`.
