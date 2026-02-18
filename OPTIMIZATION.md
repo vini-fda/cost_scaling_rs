@@ -199,3 +199,51 @@ load head-index  →  add+lsl #6 (1 cy)  →  load nodes[head].price     (2 depe
 The extra `add+lsl` step sits on the critical dependency path. With an L1 hit (~4 cy), the arithmetic adds ~25% extra latency to that chain segment. With an L2 miss the arithmetic is hidden in the miss latency and the difference shrinks — which explains why the gap narrows at larger problem sizes (more cache pressure, longer miss latencies dominate).
 
 **`ldp` not emitted:** `cost` (at `[x2, #-8]`) and `head` (at `[x2]`) are adjacent in memory, so a `ldp x4, x9, [x2, #-8]` would load both in one instruction (matching GCC's behavior on the C struct). LLVM does not emit it because the two values are consumed at different points in the loop body and register pressure differs. This is a missed optimization in LLVM's AArch64 backend for this pattern.
+
+## u32 newtype indices: Node 64 → 32 bytes (committed)
+
+**Hypothesis:** Replacing `NodeIndex = usize` and `ArcIndex = usize` type aliases
+with `NodeIdx(u32)` and `ArcIdx(u32)` newtype wrappers shrinks struct sizes:
+
+- `Node`: 64 bytes → 32 bytes (`first`, `current`, `suspended`, `q_next` each
+  drop from 8 bytes to 4 bytes; `dfs_parent` and `inp` moved to parallel arrays
+  `McmfCs2::dfs_parent` and `McmfCs2::inp` to keep the hot-path struct lean)
+- `Arc`: 32 bytes → 24 bytes (`head` and `sister` drop from 8 bytes to 4 bytes)
+- `BucketArray` per-node arrays (`b_next`, `b_prev`): element size halved
+
+The stride multiply for `nodes[head]` access was `lsl #6` (64-byte stride) and
+becomes `lsl #5` (32-byte stride), saving 1 cycle on the 3-step critical path.
+Twice as many nodes fit per L1/L2 cache line.
+
+**Change:** Replaced type aliases with newtype wrappers. Added `::NONE`, `.idx()`,
+and arithmetic impls (`Add<u32>`, `Sub<u32>`, `AddAssign<u32>`, `SubAssign<u32>`)
+to `ArcIdx`. All call sites use `.idx()` for array indexing and `Foo(x as u32)`
+for construction. All 53 tests pass.
+
+**Result:**
+
+| Problem | Rust (before, 64-byte Node) | Rust (after, 32-byte Node) | C | Ratio (after) |
+|---------|----------------------------|---------------------------|---|---------------|
+| 500n    | ~4.6ms                     | 4.5ms                     | 4.3ms | 1.05x |
+| 2000n   | ~33.6ms                    | 32.8ms                    | 30.0ms | 1.10x |
+| 5000n   | ~103.8ms                   | 102.1ms                   | 92.9ms | 1.10x |
+| 10000n  | ~281.1ms                   | 273.4ms                   | 247.4ms | 1.11x |
+
+~2–3% improvement across all problem sizes. The gap with C narrowed from ~11–12%
+to ~10–11%.
+
+**Why modest gains:** The `lsl #5` vs `lsl #6` saves 1 cycle per node access on
+the hot path, but at large problem sizes most accesses miss L2 and the arithmetic
+latency is hidden behind the ~50+ cy miss penalty. The benefit is most visible at
+500n (fits in L1/L2) where the ratio improved most (1.07x → 1.05x).
+
+**Assembly update** (32-byte Node, AArch64):
+```asm
+ldr   x9, [x2]             ; arcs[a].head  (index, u32)
+add   x9, x13, x9, lsl #5  ; nodes_base + head * 32  ← lsl #5 (was lsl #6)
+ldr   x9, [x9, #8]         ; nodes[head].price  (offset 8, was 32)
+```
+
+The price field is now at offset 8 instead of 32 (since Node is 32 bytes and
+`excess` + `price` are still the first two fields). The stride multiply is
+`lsl #5` vs the previous `lsl #6`.
