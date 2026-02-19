@@ -34,8 +34,6 @@ It aims to match the performance of the C implementation using 100% native Rust,
 - `benches/` - Criterion benchmarks.
 - `examples/gen_goto.rs` - GOTO problem generator CLI.
 - `docs/` - Documentation.
-- `OPTIMIZATION.md` - Documentation on the optimization process.
-  - New sections should be added as you learn
 
 # Context and how to work on this repo
 
@@ -55,6 +53,4 @@ The current state is that:
 - some datatypes and data structures are not isolated into their own high-performance APIs.
   - this makes e.g. testing a "Bucket" implementation in isolation difficult
 
-First, read README.md to get an overview. Then, read OPTIMIZATION.md to get the current state of optimization.
-
-The transcribed Goldberg paper in `docs/main.typ` gives a thorough explanation of the reasoning behind concepts, decisions, heuristics and optimizations of the original code. It should be seen as a guide.
+First, read README.md to get an overview. The transcribed Goldberg paper in `docs/main.typ` gives a thorough explanation of the reasoning behind concepts, decisions, heuristics and optimizations of the C original code. It should be seen as a guide.
