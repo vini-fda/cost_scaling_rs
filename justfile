@@ -17,7 +17,7 @@ clippy:
 test +args='':
   cargo test --workspace {{args}}
 
-build profile='dev':
+build profile='release':
   cargo build --workspace --profile {{profile}}
 
 run +args='testdata/sample.inp':
