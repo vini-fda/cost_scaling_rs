@@ -101,13 +101,13 @@ HTML reports are generated in `target/criterion/`. Subsequent runs report relati
 End-to-end timing comparison against the reference C implementation using [hyperfine](https://github.com/sharkdp/hyperfine):
 
 ```bash
-./bench-compare.sh
+cargo run --release --example bench_compare
 ```
 
 This builds both binaries with maximum optimization (`-O3`/LTO), generates GOTO problems at 500–10,000 nodes, and runs hyperfine on each. Extra arguments are forwarded to hyperfine:
 
 ```bash
-./bench-compare.sh --warmup 5 --min-runs 50
+cargo run --release --example bench_compare -- --warmup 5 --min-runs 50
 ```
 
 **Dependencies:** `cargo`, `gcc`/`cc`, `make`, `hyperfine` (`brew install hyperfine` or `cargo install hyperfine`).
