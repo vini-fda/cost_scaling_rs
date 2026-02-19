@@ -88,7 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run(
         "cargo",
         &[
-            "run", "--release", "--quiet", "--example", "gen_goto", "--",
+            "run",
+            "--release",
+            "--quiet",
+            "--example",
+            "gen_goto",
+            "--",
             DATA_DIR,
         ],
     )?;
