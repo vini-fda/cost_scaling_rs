@@ -38,7 +38,7 @@ Criterion's own `change` measurements (comparing against its saved baseline from
 5. All bucket operations now go through `BucketArray` methods (`insert`, `remove`, `get`,
    `nonempty`, `reset`).
 
-## Rust vs C Comparison (hyperfine, `bench-compare.sh`)
+## Rust vs C Comparison (hyperfine, `bench_compare`)
 
 End-to-end timing on larger GOTO problems using hyperfine, comparing master, bucket-array,
 and the reference C implementation (gcc -O3 -march=native -flto).

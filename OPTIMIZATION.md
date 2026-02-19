@@ -4,7 +4,7 @@ Performance experiments and findings from profiling the Rust implementation agai
 
 ## Baseline (before optimization)
 
-Benchmarked with `bench-compare.sh` on GOTO problems (macOS, Apple Silicon):
+Benchmarked with `cargo run --release --example bench_compare` on GOTO problems (macOS, Apple Silicon):
 
 | Problem | Rust | C | Ratio |
 |---------|------|---|-------|
@@ -156,7 +156,7 @@ Absolute improvement ~10% across all sizes. The gap relative to C remained at ~1
 
 ## target-cpu=native (committed)
 
-**Hypothesis:** The bench-compare script passes `-march=native -flto` to GCC but Rust builds had no equivalent. Adding `-C target-cpu=native` via `.cargo/config.toml` levels the playing field and may enable LLVM to use Apple Silicon-specific instructions.
+**Hypothesis:** The benchmark runner passes `-march=native -flto` to GCC but Rust builds had no equivalent. Adding `-C target-cpu=native` via `.cargo/config.toml` levels the playing field and may enable LLVM to use Apple Silicon-specific instructions.
 
 **Change:** Added `.cargo/config.toml`:
 ```toml
