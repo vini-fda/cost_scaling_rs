@@ -23,6 +23,9 @@ build profile='release':
 run +args='testdata/sample.inp':
   cargo run -- {{args}}
 
+clean:
+  cargo clean
+
 ci: fmt-check clippy test
 
 # ---------------------------------------------------------------------------
