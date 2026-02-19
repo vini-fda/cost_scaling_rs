@@ -11,7 +11,7 @@ cargo install --locked samply
 ## Quick start
 
 ```bash
-./profile.sh
+cargo run --example profile
 ```
 
 This builds the binary using the `profiling` cargo profile (release optimizations with debug symbols, no stripping), generates test data if needed, runs 20 iterations of the 10k-node problem, and opens the Firefox Profiler in your browser.
@@ -19,15 +19,15 @@ This builds the binary using the `profiling` cargo profile (release optimization
 ## Options
 
 ```bash
-./profile.sh                    # default: 20 iterations, 10k nodes, opens browser
-./profile.sh --save-only        # save profile.json instead of opening browser
-./profile.sh --iterations 50    # more iterations = more samples = better accuracy
-./profile.sh --size 5000        # use 5k-node problem instead
+cargo run --example profile                        # default: 20 iterations, 10k nodes, opens browser
+cargo run --example profile -- --save-only         # save profile.json instead of opening browser
+cargo run --example profile -- --iterations 50     # more iterations = more samples = better accuracy
+cargo run --example profile -- --size 5000         # use 5k-node problem instead
 ```
 
 ## Viewing results
 
-- **Live**: By default, `profile.sh` opens the Firefox Profiler at `http://localhost:3000+`.
+- **Live**: By default, the profiler opens the Firefox Profiler at `http://localhost:3000+`.
 - **Saved**: With `--save-only`, upload `profile.json` to https://profiler.firefox.com/ (click "Load a profile from file").
 
 ## What to look for
