@@ -15,6 +15,7 @@ It aims to match the performance of the C implementation using 100% native Rust,
 - Run: `cargo run`
 - Lint: `cargo clippy`
 - Format: `cargo fmt`
+- Look at the `justfile` to see project-specific commands
 
 # Code Style
 - Follow Rust 2024 edition conventions
