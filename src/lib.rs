@@ -1258,6 +1258,7 @@ impl McmfCs2 {
     ///   pointer is updated.
     /// - **Error:** No residual arcs exist and all arcs are suspended, indicating
     ///   infeasibility or price overflow.
+    #[inline]
     fn relabel(&mut self, i: NodeIndex) -> Result<bool, Cs2Error> {
         // SAFETY: only called from discharge/price_in, which run after
         // cs2_initialize has set base pointers.
@@ -1344,7 +1345,6 @@ impl McmfCs2 {
     /// The loop alternates between pushing along the current arc and relabeling
     /// when the current arc is inadmissible, stopping when `i`'s excess drops
     /// to zero or `flag_price` signals that suspended arcs need attention.
-    #[inline(never)]
     fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
         // SAFETY: invoked from refine() after cs2_initialize.
         unsafe {
@@ -1527,7 +1527,6 @@ impl McmfCs2 {
     /// that may have become relevant). If the price update fails because some
     /// surplus nodes are unreachable, widens the arc-fixing threshold and
     /// retries.
-    #[inline(never)]
     fn refine(&mut self) -> Result<(), Cs2Error> {
         // SAFETY: called from cs2 after cs2_initialize set base pointers.
         unsafe {
