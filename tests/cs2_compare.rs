@@ -75,9 +75,9 @@ fn run_c(input: &str) -> SolverOutput {
             child
                 .stdin
                 .take()
-                .unwrap()
+                .expect("child stdin should be piped")
                 .write_all(input.as_bytes())
-                .unwrap();
+                .expect("failed to write input to cs2 stdin");
             child.wait_with_output()
         })
         .expect("failed to run cs2 binary");
@@ -105,9 +105,9 @@ fn run_c(input: &str) -> SolverOutput {
         } else if line.starts_with("f ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             assert!(parts.len() >= 4, "bad flow line: {line}");
-            let tail: usize = parts[1].parse().unwrap();
-            let head: usize = parts[2].parse().unwrap();
-            let flow: i64 = parts[3].parse().unwrap();
+            let tail: usize = parts[1].parse().expect("failed to parse tail node id");
+            let head: usize = parts[2].parse().expect("failed to parse head node id");
+            let flow: i64 = parts[3].parse().expect("failed to parse flow value");
             if flow != 0 {
                 flows.insert((tail, head), flow);
             }
@@ -704,7 +704,7 @@ a 2 4 0 10 1
 a 1 3 0 10 5
 a 3 4 0 10 5
 ";
-    let solver = McmfCs2::from_dimacs(input).unwrap();
+    let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
     let solution = solver
         .min_cost(true, true)
         .expect("should be feasible and CS-optimal");
