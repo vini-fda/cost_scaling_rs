@@ -73,24 +73,27 @@ enum Color {
 }
 
 /// A node in the min-cost flow network.
+///
+/// Field layout mirrors the C `node` struct so that `a->head->price` is a
+/// single load with offset, without any base+index*sizeof arithmetic.
 #[derive(Clone)]
 struct Node {
-    /// First outgoing arc index.
-    first: ArcIndex,
-    /// Current outgoing arc index.
-    current: ArcIndex,
-    /// First suspended arc index.
-    suspended: ArcIndex,
+    /// First outgoing arc pointer.
+    first: *mut Arc,
+    /// Current outgoing arc pointer.
+    current: *mut Arc,
+    /// First suspended arc pointer.
+    suspended: *mut Arc,
     /// Excess of the node.
     excess: Excess,
     /// Distance from a sink (node potential).
     price: Price,
-    /// Next node in push-queue.
-    q_next: NodeIndex,
+    /// Next node in push-queue (or [`McmfCs2::sentinel_node_ptr`] if out of queue).
+    q_next: *mut Node,
     /// Next node in bucket-list.
-    b_next: NodeIndex,
+    b_next: *mut Node,
     /// Previous node in bucket-list.
-    b_prev: NodeIndex,
+    b_prev: *mut Node,
     /// Bucket number.
     rank: i64,
     /// DFS visit color (White/Grey/Black) used in price_refine and compute_prices.
@@ -104,17 +107,21 @@ struct Arc {
     res_capacity: i64,
     /// Cost of the arc.
     cost: Price,
-    /// Head node index.
-    head: NodeIndex,
-    /// Opposite (sister) arc index.
-    sister: ArcIndex,
+    /// Head node pointer.
+    ///
+    /// Stored as a raw pointer (matching the C implementation's `arc::head:
+    /// node*`) so `(*a).head` is a direct address instead of an index that
+    /// requires `base + idx*sizeof(Node)` arithmetic on every access.
+    head: *mut Node,
+    /// Opposite (sister) arc pointer.
+    sister: *mut Arc,
 }
 
 /// A bucket used for node ordering during price updates.
 #[derive(Clone)]
 struct Bucket {
-    /// First node in the bucket.
-    p_first: NodeIndex,
+    /// First node in the bucket (or `dnode` if the bucket is empty).
+    p_first: *mut Node,
 }
 
 /// The update flag.
@@ -199,20 +206,20 @@ pub struct McmfCs2 {
     cap: Vec<i64>,
     /// Array of nodes.
     nodes: Vec<Node>,
-    /// Cached base pointer for `nodes`, valid after [`Self::cs2_initialize`].
+    /// Cached base pointer for `nodes`, valid after [`Self::allocate_arrays`].
     nodes_base: *mut Node,
-    /// Sentinel node index (one past last real node).
-    sentinel_node: NodeIndex,
-    /// First node in push-queue.
-    excq_first: NodeIndex,
-    /// Last node in push-queue.
-    excq_last: NodeIndex,
+    /// Sentinel node pointer (one past last real node).
+    sentinel_node: *mut Node,
+    /// First node in push-queue, or null when empty.
+    excq_first: *mut Node,
+    /// Last node in push-queue, or null when empty.
+    excq_last: *mut Node,
     /// Array of arcs.
     arcs: Vec<Arc>,
-    /// Cached base pointer for `arcs`, valid after [`Self::cs2_initialize`].
+    /// Cached base pointer for `arcs`, valid after [`Self::allocate_arrays`].
     arcs_base: *mut Arc,
-    /// Sentinel arc index (one past last real arc).
-    sentinel_arc: ArcIndex,
+    /// Sentinel arc pointer (one past last real arc).
+    sentinel_arc: *mut Arc,
 
     /// Array of buckets.
     buckets: Vec<Bucket>,
@@ -252,10 +259,10 @@ pub struct McmfCs2 {
     /// Maximal number of cycles cancelled during price refine.
     snc_max: i32,
 
-    /// Index of dummy node in `nodes` (address of d_node).
-    dummy_node: NodeIndex,
-    /// dnode index used for bucket sentinel.
-    dnode: NodeIndex,
+    /// Pointer to dummy node for the excess queue.
+    dummy_node: *mut Node,
+    /// Pointer to the dnode used as a bucket sentinel.
+    dnode: *mut Node,
 
     /// Number of relabels from last price update.
     n_rel: u64,
@@ -324,14 +331,14 @@ fn n_node(i: NodeIndex, node_min: usize) -> i64 {
 impl Default for Node {
     fn default() -> Self {
         Node {
-            first: NONE,
-            current: NONE,
-            suspended: NONE,
+            first: std::ptr::null_mut(),
+            current: std::ptr::null_mut(),
+            suspended: std::ptr::null_mut(),
             excess: 0,
             price: 0,
-            q_next: NONE,
-            b_next: NONE,
-            b_prev: NONE,
+            q_next: std::ptr::null_mut(),
+            b_next: std::ptr::null_mut(),
+            b_prev: std::ptr::null_mut(),
             rank: 0,
             inp: Color::White,
         }
@@ -343,15 +350,17 @@ impl Default for Arc {
         Arc {
             res_capacity: 0,
             cost: 0,
-            head: NONE,
-            sister: NONE,
+            head: std::ptr::null_mut(),
+            sister: std::ptr::null_mut(),
         }
     }
 }
 
 impl Default for Bucket {
     fn default() -> Self {
-        Bucket { p_first: NONE }
+        Bucket {
+            p_first: std::ptr::null_mut(),
+        }
     }
 }
 
@@ -391,12 +400,12 @@ impl McmfCs2 {
             cap: Vec::new(),
             nodes: Vec::new(),
             nodes_base: std::ptr::null_mut(),
-            sentinel_node: NONE,
-            excq_first: NONE,
-            excq_last: NONE,
+            sentinel_node: std::ptr::null_mut(),
+            excq_first: std::ptr::null_mut(),
+            excq_last: std::ptr::null_mut(),
             arcs: Vec::new(),
             arcs_base: std::ptr::null_mut(),
-            sentinel_arc: NONE,
+            sentinel_arc: std::ptr::null_mut(),
 
             buckets: Vec::new(),
             buckets_base: std::ptr::null_mut(),
@@ -418,8 +427,8 @@ impl McmfCs2 {
             flag_updt: UpdateFlag::Ok,
             snc_max: 0,
 
-            dummy_node: NONE,
-            dnode: NONE,
+            dummy_node: std::ptr::null_mut(),
+            dnode: std::ptr::null_mut(),
 
             n_rel: 0,
             n_ref: 0,
@@ -492,20 +501,14 @@ impl McmfCs2 {
     /// This is the "push" in the push-relabel method.
     ///
     /// # Safety
-    /// Caller must ensure `i` and `j` index valid nodes and `a` indexes a
-    /// valid arc; equivalently, that `cs2_initialize` has run and the
-    /// arenas have not been reallocated since.
+    /// Caller must pass valid node/arc pointers (i.e., into the live arenas).
     #[inline(always)]
-    unsafe fn increase_flow(&mut self, i: NodeIndex, j: NodeIndex, a: ArcIndex, df: i64) {
+    unsafe fn increase_flow(&mut self, i: *mut Node, j: *mut Node, a: *mut Arc, df: i64) {
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
-            (*nb.add(i)).excess -= df;
-            (*nb.add(j)).excess += df;
-            let arc = ab.add(a);
-            (*arc).res_capacity -= df;
-            let sister = (*arc).sister;
-            (*ab.add(sister)).res_capacity += df;
+            (*i).excess -= df;
+            (*j).excess += df;
+            (*a).res_capacity -= df;
+            (*(*a).sister).res_capacity += df;
             self.n_push += 1;
         }
     }
@@ -526,68 +529,65 @@ impl McmfCs2 {
     #[inline(always)]
     unsafe fn reset_excess_q(&mut self) {
         unsafe {
-            let nb = self.nodes_base;
-            while self.excq_first != NONE {
-                let next = (*nb.add(self.excq_first)).q_next;
-                (*nb.add(self.excq_first)).q_next = self.sentinel_node;
+            while !self.excq_first.is_null() {
+                let next = (*self.excq_first).q_next;
+                (*self.excq_first).q_next = self.sentinel_node;
                 self.excq_first = next;
             }
-            self.excq_last = NONE;
+            self.excq_last = std::ptr::null_mut();
         }
     }
 
     /// Returns true if node `i` is not in the excess queue.
     ///
     /// # Safety
-    /// Requires base pointers to be set.
+    /// Caller must pass a valid node pointer.
     #[inline(always)]
-    unsafe fn out_of_excess_q(&self, i: NodeIndex) -> bool {
-        unsafe { (*self.nodes_base.add(i)).q_next == self.sentinel_node }
+    unsafe fn out_of_excess_q(&self, i: *mut Node) -> bool {
+        unsafe { (*i).q_next == self.sentinel_node }
     }
 
     /// Returns true if the excess queue is empty.
     #[inline(always)]
     fn empty_excess_q(&self) -> bool {
-        self.excq_first == NONE
+        self.excq_first.is_null()
     }
 
     /// Returns true if the excess queue is non-empty.
     #[inline(always)]
     fn nonempty_excess_q(&self) -> bool {
-        self.excq_first != NONE
+        !self.excq_first.is_null()
     }
 
     /// Insert node `i` at the back of the excess queue.
     ///
     /// # Safety
-    /// Requires base pointers to be set.
+    /// Caller must pass a valid node pointer.
     #[inline(always)]
-    unsafe fn insert_to_excess_q(&mut self, i: NodeIndex) {
+    unsafe fn insert_to_excess_q(&mut self, i: *mut Node) {
         unsafe {
-            let nb = self.nodes_base;
             if self.nonempty_excess_q() {
-                (*nb.add(self.excq_last)).q_next = i;
+                (*self.excq_last).q_next = i;
             } else {
                 self.excq_first = i;
             }
-            (*nb.add(i)).q_next = NONE;
+            (*i).q_next = std::ptr::null_mut();
             self.excq_last = i;
         }
     }
 
-    /// Remove the front node from the excess queue. Returns the removed node index.
+    /// Remove the front node from the excess queue. Returns the removed node pointer.
     ///
     /// # Safety
-    /// Requires base pointers to be set and the queue to be non-empty.
+    /// Caller must ensure the queue is non-empty.
     #[inline(always)]
-    unsafe fn remove_from_excess_q(&mut self) -> NodeIndex {
+    unsafe fn remove_from_excess_q(&mut self) -> *mut Node {
         unsafe {
-            let nb = self.nodes_base;
             let i = self.excq_first;
-            self.excq_first = (*nb.add(i)).q_next;
-            (*nb.add(i)).q_next = self.sentinel_node;
-            if self.excq_first == NONE {
-                self.excq_last = NONE;
+            self.excq_first = (*i).q_next;
+            (*i).q_next = self.sentinel_node;
+            if self.excq_first.is_null() {
+                self.excq_last = std::ptr::null_mut();
             }
             i
         }
@@ -615,21 +615,21 @@ impl McmfCs2 {
     /// Push node `i` onto the stack-queue.
     ///
     /// # Safety
-    /// Requires base pointers to be set.
+    /// Caller must pass a valid node pointer.
     #[inline(always)]
-    unsafe fn stackq_push(&mut self, i: NodeIndex) {
+    unsafe fn stackq_push(&mut self, i: *mut Node) {
         unsafe {
-            (*self.nodes_base.add(i)).q_next = self.excq_first;
+            (*i).q_next = self.excq_first;
             self.excq_first = i;
         }
     }
 
-    /// Pop the front node from the stack-queue. Returns the popped node index.
+    /// Pop the front node from the stack-queue. Returns the popped node pointer.
     ///
     /// # Safety
-    /// Requires base pointers to be set and the stack to be non-empty.
+    /// Caller must ensure the stack is non-empty.
     #[inline(always)]
-    unsafe fn stackq_pop(&mut self) -> NodeIndex {
+    unsafe fn stackq_pop(&mut self) -> *mut Node {
         unsafe { self.remove_from_excess_q() }
     }
 
@@ -658,31 +658,30 @@ impl McmfCs2 {
     /// Insert node `i` into bucket `b`.
     ///
     /// # Safety
-    /// Requires base pointers to be set.
+    /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
-    unsafe fn insert_to_bucket(&mut self, i: NodeIndex, b: BucketIndex) {
+    unsafe fn insert_to_bucket(&mut self, i: *mut Node, b: BucketIndex) {
         unsafe {
-            let nb = self.nodes_base;
-            let bb = self.buckets_base;
-            let old_first = (*bb.add(b)).p_first;
-            (*nb.add(i)).b_next = old_first;
+            let bucket = self.buckets_base.add(b);
+            let old_first = (*bucket).p_first;
+            (*i).b_next = old_first;
             if old_first != self.dnode {
-                (*nb.add(old_first)).b_prev = i;
+                (*old_first).b_prev = i;
             }
-            (*bb.add(b)).p_first = i;
+            (*bucket).p_first = i;
         }
     }
 
-    /// Get (pop) the first node from bucket `b`. Returns the node index.
+    /// Get (pop) the first node from bucket `b`. Returns the node pointer.
     ///
     /// # Safety
-    /// Requires base pointers to be set and bucket `b` to be non-empty.
+    /// Caller must ensure bucket `b` is non-empty.
     #[inline(always)]
-    unsafe fn get_from_bucket(&mut self, b: BucketIndex) -> NodeIndex {
+    unsafe fn get_from_bucket(&mut self, b: BucketIndex) -> *mut Node {
         unsafe {
-            let bb = self.buckets_base;
-            let i = (*bb.add(b)).p_first;
-            (*bb.add(b)).p_first = (*self.nodes_base.add(i)).b_next;
+            let bucket = self.buckets_base.add(b);
+            let i = (*bucket).p_first;
+            (*bucket).p_first = (*i).b_next;
             i
         }
     }
@@ -690,20 +689,19 @@ impl McmfCs2 {
     /// Remove node `i` from bucket `b`.
     ///
     /// # Safety
-    /// Requires base pointers to be set.
+    /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
-    unsafe fn remove_from_bucket(&mut self, i: NodeIndex, b: BucketIndex) {
+    unsafe fn remove_from_bucket(&mut self, i: *mut Node, b: BucketIndex) {
         unsafe {
-            let nb = self.nodes_base;
-            let bb = self.buckets_base;
-            if i == (*bb.add(b)).p_first {
-                (*bb.add(b)).p_first = (*nb.add(i)).b_next;
+            let bucket = self.buckets_base.add(b);
+            if i == (*bucket).p_first {
+                (*bucket).p_first = (*i).b_next;
             } else {
-                let prev = (*nb.add(i)).b_prev;
-                let next = (*nb.add(i)).b_next;
-                (*nb.add(prev)).b_next = next;
+                let prev = (*i).b_prev;
+                let next = (*i).b_next;
+                (*prev).b_next = next;
                 if next != self.dnode {
-                    (*nb.add(next)).b_prev = prev;
+                    (*next).b_prev = prev;
                 }
             }
         }
@@ -754,11 +752,11 @@ impl McmfCs2 {
                 (*b_ptr).cost = d_cost;
                 (*b_ptr).head = d_head;
 
-                if a != sb {
+                if a_ptr != sb {
                     (*b_ptr).sister = sa;
                     (*a_ptr).sister = sb;
-                    (*ab.add(sa)).sister = b;
-                    (*ab.add(sb)).sister = a;
+                    (*sa).sister = b_ptr;
+                    (*sb).sister = a_ptr;
                 }
             }
             // Swap capacities (separate Vec).
@@ -778,6 +776,14 @@ impl McmfCs2 {
         self.cap = vec![0i64; 2 * self.m];
         self.arc_tail = vec![0usize; 2 * self.m];
         self.arc_first = vec![0i64; self.n + 2];
+
+        // Cache base pointers now. These are stable for set_arc/pre_processing
+        // because: nodes/arcs Vecs are never grown past their reserved
+        // capacity, and Vec::drain (used in pre_processing) does not
+        // reallocate. The two pushes in cs2_initialize fit within the
+        // pre-reserved capacity.
+        self.nodes_base = self.nodes.as_mut_ptr();
+        self.arcs_base = self.arcs.as_mut_ptr();
 
         self.pos_current = 0;
         self.arc_current = 0;
@@ -820,16 +826,24 @@ impl McmfCs2 {
 
         self.arc_tail[pc] = tail_node_id;
         self.arc_tail[pc + 1] = head_node_id;
-        self.arcs[ac].head = head_node_id;
+        // SAFETY: nodes_base/arcs_base set in allocate_arrays; tail/head IDs
+        // were validated against self.n above; ac < 2*m.
+        unsafe {
+            let head_p = self.nodes_base.add(head_node_id);
+            let tail_p = self.nodes_base.add(tail_node_id);
+            let fwd = self.arcs_base.add(ac);
+            let rev = self.arcs_base.add(ac + 1);
+            self.arcs[ac].head = head_p;
+            self.arcs[ac].sister = rev;
+            self.arcs[ac + 1].head = tail_p;
+            self.arcs[ac + 1].sister = fwd;
+        }
         self.arcs[ac].res_capacity = up_bound - low_bound;
         self.cap[pc] = up_bound;
         self.arcs[ac].cost = cost;
-        self.arcs[ac].sister = ac + 1;
-        self.arcs[ac + 1].head = tail_node_id;
         self.arcs[ac + 1].res_capacity = 0;
         self.cap[pc + 1] = 0;
         self.arcs[ac + 1].cost = -cost;
-        self.arcs[ac + 1].sister = ac;
 
         self.nodes[tail_node_id].excess -= low_bound;
         self.nodes[head_node_id].excess += low_bound;
@@ -884,53 +898,71 @@ impl McmfCs2 {
             "Unbalanced problem"
         );
 
-        // first arc from the first node
-        self.nodes[self.node_min].first = 0;
+        // first arc from the first node.
+        // SAFETY: arcs_base / nodes_base set in allocate_arrays.
+        unsafe {
+            self.nodes[self.node_min].first = self.arcs_base;
 
-        // prefix-sum: arc_first[i] becomes position of first outgoing arc from node i
-        for i in (self.node_min + 1)..=(self.node_max + 1) {
-            self.arc_first[i] += self.arc_first[i - 1];
-            self.nodes[i].first = self.arc_first[i] as usize;
+            // prefix-sum: arc_first[i] becomes position of first outgoing arc from node i
+            for i in (self.node_min + 1)..=(self.node_max + 1) {
+                self.arc_first[i] += self.arc_first[i - 1];
+                self.nodes[i].first = self.arcs_base.add(self.arc_first[i] as usize);
+            }
         }
 
         // reorder arcs by source node
         for i in self.node_min..self.node_max {
-            let last = self.nodes[i + 1].first;
+            // SAFETY: nodes_base/arcs_base set in allocate_arrays.
+            let last = unsafe {
+                self.nodes[i + 1].first.offset_from(self.arcs_base) as usize
+            };
             let mut arc_num = self.arc_first[i] as usize;
             while arc_num < last {
                 let mut tail_node_id = self.arc_tail[arc_num];
                 while tail_node_id != i {
                     let arc_new_num = self.arc_first[tail_node_id] as usize;
 
-                    // swap heads
-                    let tmp = self.arcs[arc_new_num].head;
-                    self.arcs[arc_new_num].head = self.arcs[arc_num].head;
-                    self.arcs[arc_num].head = tmp;
+                    // SAFETY: arcs_base set in allocate_arrays; arc_num and
+                    // arc_new_num are valid arc indexes within sentinel_arc.
+                    unsafe {
+                        let ab = self.arcs_base;
+                        let p_new = ab.add(arc_new_num);
+                        let p_old = ab.add(arc_num);
 
-                    // swap caps
-                    self.cap.swap(arc_new_num, arc_num);
+                        // swap heads (pointers)
+                        let tmp_head = (*p_new).head;
+                        (*p_new).head = (*p_old).head;
+                        (*p_old).head = tmp_head;
 
-                    // swap rez_capacity
-                    let tmp = self.arcs[arc_new_num].res_capacity;
-                    self.arcs[arc_new_num].res_capacity = self.arcs[arc_num].res_capacity;
-                    self.arcs[arc_num].res_capacity = tmp;
+                        // swap rez_capacity
+                        let tmp_rez = (*p_new).res_capacity;
+                        (*p_new).res_capacity = (*p_old).res_capacity;
+                        (*p_old).res_capacity = tmp_rez;
 
-                    // swap cost
-                    let tmp = self.arcs[arc_new_num].cost;
-                    self.arcs[arc_new_num].cost = self.arcs[arc_num].cost;
-                    self.arcs[arc_num].cost = tmp;
+                        // swap cost
+                        let tmp_cost = (*p_new).cost;
+                        (*p_new).cost = (*p_old).cost;
+                        (*p_old).cost = tmp_cost;
 
-                    // swap sisters
-                    if arc_new_num != self.arcs[arc_num].sister {
-                        let tmp = self.arcs[arc_new_num].sister;
-                        self.arcs[arc_new_num].sister = self.arcs[arc_num].sister;
-                        self.arcs[arc_num].sister = tmp;
+                        // swap sisters (pointers). If the two arcs being
+                        // swapped are each other's sisters, the sister
+                        // relationship is already preserved by the swap
+                        // above; otherwise the *other* arcs' sister fields
+                        // must be redirected to the new positions.
+                        if p_new != (*p_old).sister {
+                            let tmp_s = (*p_new).sister;
+                            (*p_new).sister = (*p_old).sister;
+                            (*p_old).sister = tmp_s;
 
-                        let s1 = self.arcs[arc_num].sister;
-                        self.arcs[s1].sister = arc_num;
-                        let s2 = self.arcs[arc_new_num].sister;
-                        self.arcs[s2].sister = arc_new_num;
+                            let s1 = (*p_old).sister;
+                            (*s1).sister = p_old;
+                            let s2 = (*p_new).sister;
+                            (*s2).sister = p_new;
+                        }
                     }
+
+                    // swap caps (separate Vec)
+                    self.cap.swap(arc_new_num, arc_num);
 
                     self.arc_tail[arc_num] = self.arc_tail[arc_new_num];
                     self.arc_tail[arc_new_num] = tail_node_id;
@@ -942,32 +974,46 @@ impl McmfCs2 {
         }
 
         // overflow test (computed but not enforced, matching C++)
+        // SAFETY: arcs_base set in allocate_arrays; .first pointers are
+        // valid arcs base offsets.
         for ndp in self.node_min..=self.node_max {
             let mut _cap_in: Excess = self.nodes[ndp].excess;
             let mut _cap_out: Excess = -self.nodes[ndp].excess;
-            let a_start = self.nodes[ndp].first;
-            let a_end = self.nodes[ndp + 1].first;
+            let a_start = unsafe { self.nodes[ndp].first.offset_from(self.arcs_base) as usize };
+            let a_end = unsafe { self.nodes[ndp + 1].first.offset_from(self.arcs_base) as usize };
             for ac in a_start..a_end {
                 if self.cap[ac] > 0 {
                     _cap_out += self.cap[ac];
                 }
                 if self.cap[ac] == 0 {
-                    let sister = self.arcs[ac].sister;
-                    _cap_in += self.cap[sister];
+                    let sister_idx = unsafe {
+                        self.arcs[ac].sister.offset_from(self.arcs_base) as usize
+                    };
+                    _cap_in += self.cap[sister_idx];
                 }
             }
         }
 
         assert!(self.node_min <= 1, "Node ids must start from 0 or 1");
 
-        // adjustments: shift node base
+        // adjustments: shift node base.
+        // Vec::drain(0..node_min) shifts the remaining elements forward
+        // in-place. The buffer base pointer (self.nodes_base) is unchanged,
+        // but every head pointer stored in arcs is now off by `node_min`
+        // node-slots — point them back to the correct (shifted) node.
         self.n = self.node_max - self.node_min + 1;
         let node_min = self.node_min;
         if node_min > 0 {
             self.nodes.drain(0..node_min);
-            for arc in &mut self.arcs {
-                if arc.head != NONE {
-                    arc.head -= node_min;
+            // SAFETY: every arc's head is either null (default, unused) or
+            // points to a node within the original buffer; subtracting
+            // node_min keeps it pointing to the same logical element
+            // post-drain.
+            unsafe {
+                for arc in &mut self.arcs {
+                    if !arc.head.is_null() {
+                        arc.head = arc.head.sub(node_min);
+                    }
                 }
             }
         }
@@ -990,118 +1036,114 @@ impl McmfCs2 {
     ///    [`price_refine`](Self::price_refine), sized to `O(n * scale_factor)`.
     fn cs2_initialize(&mut self) {
         self.f_scale = SCALE_DEFAULT;
-        self.sentinel_node = self.n;
-        self.sentinel_arc = self.m;
+        // Base pointers were already set in allocate_arrays. pre_processing
+        // may have drained `nodes` (in-place, no reallocation), so the base
+        // address is unchanged.
+        debug_assert!(!self.nodes_base.is_null());
+        debug_assert!(!self.arcs_base.is_null());
 
-        // Cache base pointers. From this point onward, no operation may grow
-        // self.nodes or self.arcs past their reserved capacity (n+4 nodes,
-        // 2m+1 arcs — already pre-sized in allocate_arrays).
-        self.nodes_base = self.nodes.as_mut_ptr();
-        self.arcs_base = self.arcs.as_mut_ptr();
-
-        for i in 0..self.sentinel_node {
-            self.nodes[i].price = 0;
-            self.nodes[i].suspended = self.nodes[i].first;
-            self.nodes[i].q_next = self.sentinel_node;
-        }
-
-        self.nodes[self.sentinel_node].first = self.sentinel_arc;
-        self.nodes[self.sentinel_node].suspended = self.sentinel_arc;
-
-        // saturate negative arcs
-        // SAFETY: nodes_base/arcs_base were set above; the loop indexes
-        // stay within their valid ranges.
+        // SAFETY: all bases valid post-allocate_arrays/pre_processing.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
-            for i in 0..self.sentinel_node {
-                let a_stop = (*nb.add(i + 1)).suspended;
-                let mut a = (*nb.add(i)).first;
+            self.sentinel_node = self.nodes_base.add(self.n);
+            self.sentinel_arc = self.arcs_base.add(self.m);
+
+            for i in 0..self.n {
+                let n_ptr = self.nodes_base.add(i);
+                (*n_ptr).price = 0;
+                (*n_ptr).suspended = (*n_ptr).first;
+                (*n_ptr).q_next = self.sentinel_node;
+            }
+
+            (*self.sentinel_node).first = self.sentinel_arc;
+            (*self.sentinel_node).suspended = self.sentinel_arc;
+
+            // saturate negative arcs
+            for i in 0..self.n {
+                let i_ptr = self.nodes_base.add(i);
+                let a_stop = (*self.nodes_base.add(i + 1)).suspended;
+                let mut a = (*i_ptr).first;
                 while a < a_stop {
-                    let a_ptr = ab.add(a);
-                    if (*a_ptr).cost < 0 {
-                        let df = (*a_ptr).res_capacity;
+                    if (*a).cost < 0 {
+                        let df = (*a).res_capacity;
                         if df > 0 {
-                            let j = (*a_ptr).head;
-                            self.increase_flow(i, j, a, df);
+                            let j_ptr = (*a).head;
+                            self.increase_flow(i_ptr, j_ptr, a, df);
                         }
                     }
-                    a += 1;
+                    a = a.add(1);
                 }
             }
-        }
 
-        self.dn = (self.n + 1) as Price;
-        if self.no_zero_cycles {
-            self.dn *= 2;
-        }
+            self.dn = (self.n + 1) as Price;
+            if self.no_zero_cycles {
+                self.dn *= 2;
+            }
 
-        for a in 0..self.sentinel_arc {
-            self.arcs[a].cost *= self.dn;
-        }
+            // Scale all arc costs by dn.
+            let mut a = self.arcs_base;
+            while a < self.sentinel_arc {
+                (*a).cost *= self.dn;
+                a = a.add(1);
+            }
 
-        if self.no_zero_cycles {
-            for a in 0..self.sentinel_arc {
-                let sister = self.arcs[a].sister;
-                if self.arcs[a].cost == 0 && self.arcs[sister].cost == 0 {
-                    self.arcs[a].cost = 1;
-                    let sister = self.arcs[a].sister;
-                    self.arcs[sister].cost = -1;
+            if self.no_zero_cycles {
+                let mut a = self.arcs_base;
+                while a < self.sentinel_arc {
+                    let sister = (*a).sister;
+                    if (*a).cost == 0 && (*sister).cost == 0 {
+                        (*a).cost = 1;
+                        (*sister).cost = -1;
+                    }
+                    a = a.add(1);
                 }
             }
+
+            if (self.max_cost as f64) * (self.dn as f64) > MAX_64 as f64 {
+                println!("Warning: Arc lengths too large, overflow possible");
+            }
+            self.mmc = self.max_cost * self.dn;
+
+            self.linf = (self.dn as f64 * self.f_scale.ceil() + 2.0) as usize;
+
+            self.buckets = vec![Bucket::default(); self.linf];
+            self.buckets_base = self.buckets.as_mut_ptr();
+            self.l_bucket = self.linf;
+
+            // dnode: extra node used as bucket sentinel.
+            // self.nodes.capacity() was reserved to n+4 in allocate_arrays so
+            // this push does not reallocate (would invalidate nodes_base).
+            let dnode_idx = self.nodes.len();
+            self.nodes.push(Node::default());
+            debug_assert!(self.nodes.as_mut_ptr() == self.nodes_base);
+            self.dnode = self.nodes_base.add(dnode_idx);
+
+            for b in 0..self.l_bucket {
+                self.reset_bucket(b);
+            }
+
+            self.epsilon = self.mmc;
+            if self.epsilon < 1 {
+                self.epsilon = 1;
+            }
+
+            self.price_min = -PRICE_MAX;
+
+            self.cut_off_factor = CUT_OFF_COEF * (self.n as f64).powf(CUT_OFF_POWER);
+            if self.cut_off_factor < CUT_OFF_MIN {
+                self.cut_off_factor = CUT_OFF_MIN;
+            }
+
+            self.n_ref = 0;
+            self.flag_price = 0;
+
+            // dummy_node: extra node for excess queue
+            let dummy_idx = self.nodes.len();
+            self.nodes.push(Node::default());
+            self.dummy_node = self.nodes_base.add(dummy_idx);
+
+            self.excq_first = std::ptr::null_mut();
+            self.excq_last = std::ptr::null_mut();
         }
-
-        if (self.max_cost as f64) * (self.dn as f64) > MAX_64 as f64 {
-            println!("Warning: Arc lengths too large, overflow possible");
-        }
-        self.mmc = self.max_cost * self.dn;
-
-        self.linf = (self.dn as f64 * self.f_scale.ceil() + 2.0) as usize;
-
-        self.buckets = vec![Bucket::default(); self.linf];
-        self.buckets_base = self.buckets.as_mut_ptr();
-        self.l_bucket = self.linf;
-
-        // dnode: extra node used as bucket sentinel.
-        // self.nodes.capacity() was reserved to n+4 in allocate_arrays so
-        // this push does not reallocate (would invalidate nodes_base).
-        self.dnode = self.nodes.len();
-        self.nodes.push(Node::default());
-        debug_assert!(self.nodes.as_mut_ptr() == self.nodes_base);
-
-        for b in 0..self.l_bucket {
-            // SAFETY: buckets_base set above; b in [0, l_bucket).
-            unsafe { self.reset_bucket(b) };
-        }
-
-        self.epsilon = self.mmc;
-        if self.epsilon < 1 {
-            self.epsilon = 1;
-        }
-
-        self.price_min = -PRICE_MAX;
-
-        self.cut_off_factor = CUT_OFF_COEF * (self.n as f64).powf(CUT_OFF_POWER);
-        if self.cut_off_factor < CUT_OFF_MIN {
-            self.cut_off_factor = CUT_OFF_MIN;
-        }
-
-        self.n_ref = 0;
-        self.flag_price = 0;
-
-        // dummy_node: extra node for excess queue
-        self.dummy_node = self.nodes.len();
-        self.nodes.push(Node::default());
-
-        self.excq_first = NONE;
-        self.excq_last = NONE;
-
-        // Refresh base pointers in case the two pushes above grew the Vec.
-        // (They shouldn't — capacity was reserved in allocate_arrays — but
-        // refreshing is cheap and prevents silent UB if invariants slip.)
-        self.nodes_base = self.nodes.as_mut_ptr();
-        self.arcs_base = self.arcs.as_mut_ptr();
-        self.buckets_base = self.buckets.as_mut_ptr();
     }
 
     /// Scans node `i` during a price update, propagating distance labels
@@ -1116,31 +1158,25 @@ impl McmfCs2 {
     ///
     /// After processing all neighbors, node `i`'s price is decreased by
     /// `rank * epsilon` and its rank is set to −1 (settled).
-    fn up_node_scan(&mut self, i: NodeIndex) {
+    fn up_node_scan(&mut self, i_ptr: *mut Node) {
         // SAFETY: only called via price_update -> refine -> cs2, after
-        // cs2_initialize set base pointers; all indices stay in range.
+        // cs2_initialize set base pointers; i_ptr is a live node.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
-            let i_ptr = nb.add(i);
             self.n_scan += 1;
             let i_rank = (*i_ptr).rank;
             let i_price = (*i_ptr).price;
-            let a_start = (*i_ptr).first;
-            let a_stop = (*nb.add(i + 1)).suspended;
+            let mut a = (*i_ptr).first;
+            let a_stop = (*i_ptr.add(1)).suspended;
             let linf_i = self.linf as i64;
             let eps = self.epsilon;
 
-            for a in a_start..a_stop {
-                let a_ptr = ab.add(a);
-                let ra = (*a_ptr).sister;
-                let ra_ptr = ab.add(ra);
-                if (*ra_ptr).res_capacity > 0 {
-                    let j = (*a_ptr).head;
-                    let j_ptr = nb.add(j);
+            while a < a_stop {
+                let ra = (*a).sister;
+                if (*ra).res_capacity > 0 {
+                    let j_ptr = (*a).head;
                     let j_rank = (*j_ptr).rank;
                     if j_rank > i_rank {
-                        let rc = (*j_ptr).price + (*ra_ptr).cost - i_price;
+                        let rc = (*j_ptr).price + (*ra).cost - i_price;
                         let j_new_rank = if rc < 0 {
                             i_rank
                         } else {
@@ -1155,12 +1191,13 @@ impl McmfCs2 {
                             (*j_ptr).rank = j_new_rank;
                             (*j_ptr).current = ra;
                             if j_rank < linf_i {
-                                self.remove_from_bucket(j, j_rank as usize);
+                                self.remove_from_bucket(j_ptr, j_rank as usize);
                             }
-                            self.insert_to_bucket(j, j_new_rank as usize);
+                            self.insert_to_bucket(j_ptr, j_new_rank as usize);
                         }
                     }
                 }
+                a = a.add(1);
             }
 
             (*i_ptr).price -= i_rank * eps;
@@ -1183,18 +1220,19 @@ impl McmfCs2 {
     fn price_update(&mut self) {
         // SAFETY: only called after cs2_initialize.
         unsafe {
-            let nb = self.nodes_base;
             self.n_update += 1;
             let linf_i = self.linf as i64;
+            let sentinel_node = self.sentinel_node;
 
-            for i in 0..self.sentinel_node {
-                let n_ptr = nb.add(i);
-                if (*n_ptr).excess < 0 {
-                    self.insert_to_bucket(i, 0);
-                    (*n_ptr).rank = 0;
+            let mut p = self.nodes_base;
+            while p < sentinel_node {
+                if (*p).excess < 0 {
+                    self.insert_to_bucket(p, 0);
+                    (*p).rank = 0;
                 } else {
-                    (*n_ptr).rank = linf_i;
+                    (*p).rank = linf_i;
                 }
+                p = p.add(1);
             }
 
             let mut remain = self.total_excess;
@@ -1205,9 +1243,9 @@ impl McmfCs2 {
             let mut b = 0usize;
             while b < self.l_bucket {
                 while self.nonempty_bucket(b) {
-                    let i = self.get_from_bucket(b);
-                    self.up_node_scan(i);
-                    let i_exc = (*nb.add(i)).excess;
+                    let i_ptr = self.get_from_bucket(b);
+                    self.up_node_scan(i_ptr);
+                    let i_exc = (*i_ptr).excess;
                     if i_exc > 0 {
                         remain -= i_exc;
                         if remain <= 0 {
@@ -1228,17 +1266,18 @@ impl McmfCs2 {
             let dp = (b as i64) * self.epsilon;
             let price_min = self.price_min;
 
-            for i in 0..self.sentinel_node {
-                let n_ptr = nb.add(i);
-                let rank = (*n_ptr).rank;
+            let mut p = self.nodes_base;
+            while p < sentinel_node {
+                let rank = (*p).rank;
                 if rank >= 0 {
                     if rank < linf_i {
-                        self.remove_from_bucket(i, rank as usize);
+                        self.remove_from_bucket(p, rank as usize);
                     }
-                    if (*n_ptr).price > price_min {
-                        (*n_ptr).price -= dp;
+                    if (*p).price > price_min {
+                        (*p).price -= dp;
                     }
                 }
+                p = p.add(1);
             }
         }
     }
@@ -1259,26 +1298,23 @@ impl McmfCs2 {
     /// - **Error:** No residual arcs exist and all arcs are suspended, indicating
     ///   infeasibility or price overflow.
     #[inline]
-    fn relabel(&mut self, i: NodeIndex) -> Result<bool, Cs2Error> {
+    fn relabel(&mut self, i_ptr: *mut Node) -> Result<bool, Cs2Error> {
         // SAFETY: only called from discharge/price_in, which run after
-        // cs2_initialize has set base pointers.
+        // cs2_initialize; i_ptr is a valid live node.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
-            let i_ptr = nb.add(i);
             let mut p_max = self.price_min;
             let i_price = (*i_ptr).price;
-            let mut a_max: ArcIndex = NONE;
+            let mut a_max: *mut Arc = std::ptr::null_mut();
+
+            let current = (*i_ptr).current;
+            let a_stop = (*i_ptr.add(1)).suspended;
 
             // scan 1/2: from current+1 to end
-            let current = (*i_ptr).current;
-            let a_stop = (*nb.add(i + 1)).suspended;
-            let mut a = current + 1;
+            let mut a = current.add(1);
             while a < a_stop {
-                let a_ptr = ab.add(a);
-                if (*a_ptr).res_capacity > 0 {
-                    let head = (*a_ptr).head;
-                    let dp = (*nb.add(head)).price - (*a_ptr).cost;
+                if (*a).res_capacity > 0 {
+                    let head = (*a).head;
+                    let dp = (*head).price - (*a).cost;
                     if dp > p_max {
                         if i_price < dp {
                             (*i_ptr).current = a;
@@ -1288,18 +1324,17 @@ impl McmfCs2 {
                         a_max = a;
                     }
                 }
-                a += 1;
+                a = a.add(1);
             }
 
             // scan 2/2: from first to current+1
             let a_start2 = (*i_ptr).first;
-            let a_stop2 = current + 1;
+            let a_stop2 = current.add(1);
             let mut a = a_start2;
             while a < a_stop2 {
-                let a_ptr = ab.add(a);
-                if (*a_ptr).res_capacity > 0 {
-                    let head = (*a_ptr).head;
-                    let dp = (*nb.add(head)).price - (*a_ptr).cost;
+                if (*a).res_capacity > 0 {
+                    let head = (*a).head;
+                    let dp = (*head).price - (*a).cost;
                     if dp > p_max {
                         if i_price < dp {
                             (*i_ptr).current = a;
@@ -1309,7 +1344,7 @@ impl McmfCs2 {
                         a_max = a;
                     }
                 }
-                a += 1;
+                a = a.add(1);
             }
 
             if p_max != self.price_min {
@@ -1345,50 +1380,43 @@ impl McmfCs2 {
     /// The loop alternates between pushing along the current arc and relabeling
     /// when the current arc is inadmissible, stopping when `i`'s excess drops
     /// to zero or `flag_price` signals that suspended arcs need attention.
-    fn discharge(&mut self, i: NodeIndex) -> Result<(), Cs2Error> {
-        // SAFETY: invoked from refine() after cs2_initialize.
+    fn discharge(&mut self, i_ptr: *mut Node) -> Result<(), Cs2Error> {
+        // SAFETY: invoked from refine() after cs2_initialize; i_ptr is valid.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
-            let i_ptr = nb.add(i);
             self.n_discharge += 1;
 
             let mut a = (*i_ptr).current;
-            let mut a_ptr = ab.add(a);
-            let mut j = (*a_ptr).head;
-            let mut j_ptr = nb.add(j);
+            let mut j_ptr = (*a).head;
 
             // check admissible
-            let is_admissible = (*a_ptr).res_capacity > 0
-                && (*i_ptr).price + (*a_ptr).cost < (*j_ptr).price;
+            let is_admissible =
+                (*a).res_capacity > 0 && (*i_ptr).price + (*a).cost < (*j_ptr).price;
             if !is_admissible {
-                self.relabel(i)?;
+                self.relabel(i_ptr)?;
                 a = (*i_ptr).current;
-                a_ptr = ab.add(a);
-                j = (*a_ptr).head;
-                j_ptr = nb.add(j);
+                j_ptr = (*a).head;
             }
 
             loop {
                 let j_exc = (*j_ptr).excess;
                 if j_exc >= 0 {
-                    let df = (*i_ptr).excess.min((*a_ptr).res_capacity);
+                    let df = (*i_ptr).excess.min((*a).res_capacity);
                     if j_exc == 0 {
                         self.n_src += 1;
                     }
-                    self.increase_flow(i, j, a, df);
-                    if self.out_of_excess_q(j) {
-                        self.insert_to_excess_q(j);
+                    self.increase_flow(i_ptr, j_ptr, a, df);
+                    if self.out_of_excess_q(j_ptr) {
+                        self.insert_to_excess_q(j_ptr);
                     }
                 } else {
-                    let df = (*i_ptr).excess.min((*a_ptr).res_capacity);
-                    self.increase_flow(i, j, a, df);
+                    let df = (*i_ptr).excess.min((*a).res_capacity);
+                    self.increase_flow(i_ptr, j_ptr, a, df);
                     let j_exc_after = (*j_ptr).excess;
                     if j_exc_after >= 0 {
                         if j_exc_after > 0 {
                             self.n_src += 1;
-                            self.relabel(j)?;
-                            self.insert_to_excess_q(j);
+                            self.relabel(j_ptr)?;
+                            self.insert_to_excess_q(j_ptr);
                         }
                         self.total_excess += j_exc;
                     } else {
@@ -1404,11 +1432,9 @@ impl McmfCs2 {
                     break;
                 }
 
-                self.relabel(i)?;
+                self.relabel(i_ptr)?;
                 a = (*i_ptr).current;
-                a_ptr = ab.add(a);
-                j = (*a_ptr).head;
-                j_ptr = nb.add(j);
+                j_ptr = (*a).head;
             }
 
             (*i_ptr).current = a;
@@ -1432,55 +1458,57 @@ impl McmfCs2 {
     fn price_in(&mut self) -> i32 {
         // SAFETY: called only after cs2_initialize set base pointers.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
+            let arcs_base = self.arcs_base;
             let mut bad_found = 0;
             let mut n_in_bad = 0;
             let cut_on_i = self.cut_on as i64;
+            let sentinel_node = self.sentinel_node;
 
             'restart: loop {
-                for i in 0..self.sentinel_node {
-                    let i_ptr = nb.add(i);
+                let mut i_ptr = self.nodes_base;
+                while i_ptr < sentinel_node {
                     let initial_first = (*i_ptr).first;
                     let suspended = (*i_ptr).suspended;
                     let i_price = (*i_ptr).price;
 
                     let mut a = initial_first;
                     while a > suspended {
-                        a -= 1;
-                        let a_ptr = ab.add(a);
-                        let j = (*a_ptr).head;
-                        let rc = i_price + (*a_ptr).cost - (*nb.add(j)).price;
-                        if rc < 0 && (*a_ptr).res_capacity > 0 {
+                        a = a.sub(1);
+                        let j_ptr = (*a).head;
+                        let rc = i_price + (*a).cost - (*j_ptr).price;
+                        if rc < 0 && (*a).res_capacity > 0 {
                             if bad_found == 0 {
                                 bad_found = 1;
                                 self.update_cut_off();
                                 continue 'restart;
                             }
-                            let df = (*a_ptr).res_capacity;
-                            self.increase_flow(i, j, a, df);
+                            let df = (*a).res_capacity;
+                            self.increase_flow(i_ptr, j_ptr, a, df);
 
-                            let ra = (*a_ptr).sister;
-                            let j2 = (*a_ptr).head;
+                            let ra = (*a).sister;
+                            let j2_ptr = (*a).head;
 
-                            (*i_ptr).first -= 1;
-                            let b = (*i_ptr).first;
-                            self.exchange(a, b);
+                            (*i_ptr).first = (*i_ptr).first.sub(1);
+                            let b_idx = (*i_ptr).first.offset_from(arcs_base) as usize;
+                            let a_idx = a.offset_from(arcs_base) as usize;
+                            self.exchange(a_idx, b_idx);
 
-                            let j2_ptr = nb.add(j2);
                             if ra < (*j2_ptr).first {
-                                (*j2_ptr).first -= 1;
-                                let rb = (*j2_ptr).first;
-                                self.exchange(ra, rb);
+                                (*j2_ptr).first = (*j2_ptr).first.sub(1);
+                                let rb_idx = (*j2_ptr).first.offset_from(arcs_base) as usize;
+                                let ra_idx = ra.offset_from(arcs_base) as usize;
+                                self.exchange(ra_idx, rb_idx);
                             }
 
                             n_in_bad += 1;
                         } else if rc < cut_on_i && rc > -cut_on_i {
-                            (*i_ptr).first -= 1;
-                            let b = (*i_ptr).first;
-                            self.exchange(a, b);
+                            (*i_ptr).first = (*i_ptr).first.sub(1);
+                            let b_idx = (*i_ptr).first.offset_from(arcs_base) as usize;
+                            let a_idx = a.offset_from(arcs_base) as usize;
+                            self.exchange(a_idx, b_idx);
                         }
                     }
+                    i_ptr = i_ptr.add(1);
                 }
                 break;
             }
@@ -1492,15 +1520,16 @@ impl McmfCs2 {
                 self.n_src = 0;
                 self.reset_excess_q();
 
-                for i in 0..self.sentinel_node {
-                    let i_ptr = nb.add(i);
+                let mut i_ptr = self.nodes_base;
+                while i_ptr < sentinel_node {
                     (*i_ptr).current = (*i_ptr).first;
                     let i_exc = (*i_ptr).excess;
                     if i_exc > 0 {
                         self.total_excess += i_exc;
                         self.n_src += 1;
-                        self.insert_to_excess_q(i);
+                        self.insert_to_excess_q(i_ptr);
                     }
+                    i_ptr = i_ptr.add(1);
                 }
 
                 self.insert_to_excess_q(self.dummy_node);
@@ -1530,11 +1559,11 @@ impl McmfCs2 {
     fn refine(&mut self) -> Result<(), Cs2Error> {
         // SAFETY: called from cs2 after cs2_initialize set base pointers.
         unsafe {
-            let nb = self.nodes_base;
             self.n_refine += 1;
             self.n_ref += 1;
             self.n_rel = 0;
             let mut pr_in_int: i32 = 0;
+            let sentinel_node = self.sentinel_node;
 
             self.total_excess = 0;
             self.n_src = 0;
@@ -1542,15 +1571,16 @@ impl McmfCs2 {
 
             self.time_for_price_in = TIME_FOR_PRICE_IN1;
 
-            for i in 0..self.sentinel_node {
-                let i_ptr = nb.add(i);
-                (*i_ptr).current = (*i_ptr).first;
-                let i_exc = (*i_ptr).excess;
+            let mut p = self.nodes_base;
+            while p < sentinel_node {
+                (*p).current = (*p).first;
+                let i_exc = (*p).excess;
                 if i_exc > 0 {
                     self.total_excess += i_exc;
                     self.n_src += 1;
-                    self.insert_to_excess_q(i);
+                    self.insert_to_excess_q(p);
                 }
+                p = p.add(1);
             }
 
             if self.total_excess <= 0 {
@@ -1568,15 +1598,14 @@ impl McmfCs2 {
                     }
                 }
 
-                let i = self.remove_from_excess_q();
-                let i_ptr = nb.add(i);
+                let i_ptr = self.remove_from_excess_q();
 
                 if (*i_ptr).excess > 0 {
-                    self.discharge(i)?;
+                    self.discharge(i_ptr)?;
 
                     if self.time_for_update() || self.flag_price != 0 {
                         if (*i_ptr).excess > 0 {
-                            self.insert_to_excess_q(i);
+                            self.insert_to_excess_q(i_ptr);
                         }
 
                         if self.flag_price != 0 && self.n_ref > PRICE_OUT_START {
@@ -1631,13 +1660,12 @@ impl McmfCs2 {
     fn price_refine(&mut self) -> bool {
         // SAFETY: called from cs2 after cs2_initialize.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
             self.n_prefine += 1;
             let mut eps_optimal = true;
             let mut snc: i32 = 0;
             let linf_i = self.linf as i64;
             let eps = self.epsilon;
+            let sentinel_node = self.sentinel_node;
 
             self.snc_max = if self.n_ref >= START_CYCLE_CANCEL {
                 MAX_CYCLES_CANCELLED
@@ -1648,43 +1676,43 @@ impl McmfCs2 {
             // main loop
             loop {
                 let mut nnc: i32 = 0;
-                for i in 0..self.sentinel_node {
-                    let n_ptr = nb.add(i);
-                    (*n_ptr).rank = 0;
-                    (*n_ptr).inp = Color::White;
-                    (*n_ptr).current = (*n_ptr).first;
+                let mut p = self.nodes_base;
+                while p < sentinel_node {
+                    (*p).rank = 0;
+                    (*p).inp = Color::White;
+                    (*p).current = (*p).first;
+                    p = p.add(1);
                 }
                 self.reset_stackq();
 
-                for root in 0..self.sentinel_node {
-                    if (*nb.add(root)).inp == Color::Black {
+                let mut root = self.nodes_base;
+                while root < sentinel_node {
+                    if (*root).inp == Color::Black {
+                        root = root.add(1);
                         continue;
                     }
-                    (*nb.add(root)).b_next = NONE;
-                    let mut i = root;
+                    (*root).b_next = std::ptr::null_mut();
+                    let mut i_ptr = root;
 
                     // depth first search
                     'dfs: loop {
-                        let i_ptr = nb.add(i);
                         (*i_ptr).inp = Color::Grey;
                         let mut a = (*i_ptr).current;
-                        let a_stop = (*nb.add(i + 1)).suspended;
+                        let a_stop = (*i_ptr.add(1)).suspended;
                         let i_price = (*i_ptr).price;
                         let mut stepped = false;
 
                         while a < a_stop {
-                            let a_ptr = ab.add(a);
-                            if (*a_ptr).res_capacity > 0 {
-                                let j = (*a_ptr).head;
-                                let j_ptr = nb.add(j);
-                                let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                            if (*a).res_capacity > 0 {
+                                let j_ptr = (*a).head;
+                                let rc = i_price + (*a).cost - (*j_ptr).price;
                                 if rc < 0 {
                                     let j_inp = (*j_ptr).inp;
                                     if j_inp == Color::White {
                                         // step forward
                                         (*i_ptr).current = a;
-                                        (*j_ptr).b_next = i;
-                                        i = j;
+                                        (*j_ptr).b_next = i_ptr;
+                                        i_ptr = j_ptr;
                                         stepped = true;
                                         break;
                                     }
@@ -1695,41 +1723,41 @@ impl McmfCs2 {
                                         (*i_ptr).current = a;
 
                                         // find min capacity on cycle
-                                        let mut is = i;
-                                        let mut ir = i;
+                                        let mut is = i_ptr;
+                                        let mut ir = i_ptr;
                                         let mut df: i64 = MAX_32;
                                         loop {
-                                            let ar = (*nb.add(ir)).current;
-                                            let ar_cap = (*ab.add(ar)).res_capacity;
+                                            let ar = (*ir).current;
+                                            let ar_cap = (*ar).res_capacity;
                                             if ar_cap <= df {
                                                 df = ar_cap;
                                                 is = ir;
                                             }
-                                            if ir == j {
+                                            if ir == j_ptr {
                                                 break;
                                             }
-                                            ir = (*nb.add(ir)).b_next;
+                                            ir = (*ir).b_next;
                                         }
 
                                         // push flow around cycle
-                                        ir = i;
+                                        ir = i_ptr;
                                         loop {
-                                            let ar = (*nb.add(ir)).current;
-                                            let head = (*ab.add(ar)).head;
+                                            let ar = (*ir).current;
+                                            let head = (*ar).head;
                                             self.increase_flow(ir, head, ar, df);
-                                            if ir == j {
+                                            if ir == j_ptr {
                                                 break;
                                             }
-                                            ir = (*nb.add(ir)).b_next;
+                                            ir = (*ir).b_next;
                                         }
 
-                                        if is != i {
-                                            ir = i;
+                                        if is != i_ptr {
+                                            ir = i_ptr;
                                             while ir != is {
-                                                (*nb.add(ir)).inp = Color::White;
-                                                ir = (*nb.add(ir)).b_next;
+                                                (*ir).inp = Color::White;
+                                                ir = (*ir).b_next;
                                             }
-                                            i = is;
+                                            i_ptr = is;
                                             stepped = true;
                                             break;
                                         }
@@ -1737,7 +1765,7 @@ impl McmfCs2 {
                                     }
                                 }
                             }
-                            a += 1;
+                            a = a.add(1);
                         }
 
                         if stepped {
@@ -1748,13 +1776,14 @@ impl McmfCs2 {
                         (*i_ptr).inp = Color::Black;
                         self.n_prscan1 += 1;
                         let j = (*i_ptr).b_next;
-                        self.stackq_push(i);
-                        if j == NONE {
+                        self.stackq_push(i_ptr);
+                        if j.is_null() {
                             break 'dfs;
                         }
-                        i = j;
-                        (*nb.add(i)).current += 1;
+                        i_ptr = j;
+                        (*i_ptr).current = (*i_ptr).current.add(1);
                     }
+                    root = root.add(1);
                 }
 
                 // computing longest paths
@@ -1769,18 +1798,15 @@ impl McmfCs2 {
 
                 while self.nonempty_stackq() {
                     self.n_prscan2 += 1;
-                    let i = self.stackq_pop();
-                    let i_ptr = nb.add(i);
+                    let i_ptr = self.stackq_pop();
                     let i_rank = (*i_ptr).rank;
                     let i_price = (*i_ptr).price;
-                    let a_start = (*i_ptr).first;
-                    let a_stop = (*nb.add(i + 1)).suspended;
-                    for a in a_start..a_stop {
-                        let a_ptr = ab.add(a);
-                        if (*a_ptr).res_capacity > 0 {
-                            let j = (*a_ptr).head;
-                            let j_ptr = nb.add(j);
-                            let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                    let mut a = (*i_ptr).first;
+                    let a_stop = (*i_ptr.add(1)).suspended;
+                    while a < a_stop {
+                        if (*a).res_capacity > 0 {
+                            let j_ptr = (*a).head;
+                            let rc = i_price + (*a).cost - (*j_ptr).price;
                             if rc < 0 {
                                 let dr = (-rc as f64 - 0.5) / eps as f64;
                                 let j_rank = dr as i64 + i_rank;
@@ -1789,12 +1815,13 @@ impl McmfCs2 {
                                 }
                             }
                         }
+                        a = a.add(1);
                     }
                     if i_rank > 0 {
                         if i_rank as usize > bmax {
                             bmax = i_rank as usize;
                         }
-                        self.insert_to_bucket(i, i_rank as usize);
+                        self.insert_to_bucket(i_ptr, i_rank as usize);
                     }
                 }
 
@@ -1808,21 +1835,18 @@ impl McmfCs2 {
                     let dp = i_rank * eps;
 
                     while self.nonempty_bucket(b) {
-                        let i = self.get_from_bucket(b);
-                        let i_ptr = nb.add(i);
+                        let i_ptr = self.get_from_bucket(b);
                         self.n_prscan += 1;
 
                         let i_price = (*i_ptr).price;
-                        let a_start = (*i_ptr).first;
-                        let a_stop = (*nb.add(i + 1)).suspended;
-                        for a in a_start..a_stop {
-                            let a_ptr = ab.add(a);
-                            if (*a_ptr).res_capacity > 0 {
-                                let j = (*a_ptr).head;
-                                let j_ptr = nb.add(j);
+                        let mut a = (*i_ptr).first;
+                        let a_stop = (*i_ptr.add(1)).suspended;
+                        while a < a_stop {
+                            if (*a).res_capacity > 0 {
+                                let j_ptr = (*a).head;
                                 let j_rank = (*j_ptr).rank;
                                 if j_rank < i_rank {
-                                    let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                                    let rc = i_price + (*a).cost - (*j_ptr).price;
                                     let j_new_rank = if rc < 0 {
                                         i_rank
                                     } else {
@@ -1837,17 +1861,17 @@ impl McmfCs2 {
                                         if eps_optimal {
                                             (*j_ptr).rank = j_new_rank;
                                             if j_rank > 0 {
-                                                self.remove_from_bucket(j, j_rank as usize);
+                                                self.remove_from_bucket(j_ptr, j_rank as usize);
                                             }
-                                            self.insert_to_bucket(j, j_new_rank as usize);
+                                            self.insert_to_bucket(j_ptr, j_new_rank as usize);
                                         } else {
-                                            let df = (*a_ptr).res_capacity;
-                                            let head = (*a_ptr).head;
-                                            self.increase_flow(i, head, a, df);
+                                            let df = (*a).res_capacity;
+                                            self.increase_flow(i_ptr, j_ptr, a, df);
                                         }
                                     }
                                 }
                             }
+                            a = a.add(1);
                         }
 
                         (*i_ptr).price -= dp;
@@ -1862,22 +1886,23 @@ impl McmfCs2 {
 
             // finish: saturate non-epsilon-optimal arcs if needed
             if !eps_optimal {
-                for i in 0..self.sentinel_node {
-                    let i_ptr = nb.add(i);
-                    let i_price = (*i_ptr).price;
-                    let a_start = (*i_ptr).first;
-                    let a_stop = (*nb.add(i + 1)).suspended;
-                    for a in a_start..a_stop {
-                        let a_ptr = ab.add(a);
-                        let j = (*a_ptr).head;
-                        let rc = i_price + (*a_ptr).cost - (*nb.add(j)).price;
+                let mut p = self.nodes_base;
+                while p < sentinel_node {
+                    let i_price = (*p).price;
+                    let mut a = (*p).first;
+                    let a_stop = (*p.add(1)).suspended;
+                    while a < a_stop {
+                        let j_ptr = (*a).head;
+                        let rc = i_price + (*a).cost - (*j_ptr).price;
                         if rc < -eps {
-                            let df = (*a_ptr).res_capacity;
+                            let df = (*a).res_capacity;
                             if df > 0 {
-                                self.increase_flow(i, j, a, df);
+                                self.increase_flow(p, j_ptr, a, df);
                             }
                         }
+                        a = a.add(1);
                     }
+                    p = p.add(1);
                 }
             }
 
@@ -1896,50 +1921,50 @@ impl McmfCs2 {
     fn compute_prices(&mut self) {
         // SAFETY: called after cs2_initialize.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
             self.n_prefine += 1;
             // Whether the graph is cycle free
             // (expected for a correct, finished solution).
             let mut cycle_free = true;
             let linf_i = self.linf as i64;
 
+            let sentinel_node = self.sentinel_node;
+
             loop {
-                for i in 0..self.sentinel_node {
-                    let n_ptr = nb.add(i);
-                    (*n_ptr).rank = 0;
-                    (*n_ptr).inp = Color::White;
-                    (*n_ptr).current = (*n_ptr).first;
+                let mut p = self.nodes_base;
+                while p < sentinel_node {
+                    (*p).rank = 0;
+                    (*p).inp = Color::White;
+                    (*p).current = (*p).first;
+                    p = p.add(1);
                 }
                 self.reset_stackq();
 
-                for root in 0..self.sentinel_node {
-                    if (*nb.add(root)).inp == Color::Black {
+                let mut root = self.nodes_base;
+                while root < sentinel_node {
+                    if (*root).inp == Color::Black {
+                        root = root.add(1);
                         continue;
                     }
-                    (*nb.add(root)).b_next = NONE;
-                    let mut i = root;
+                    (*root).b_next = std::ptr::null_mut();
+                    let mut i_ptr = root;
 
                     'dfs: loop {
-                        let i_ptr = nb.add(i);
                         (*i_ptr).inp = Color::Grey;
                         let mut a = (*i_ptr).suspended;
-                        let a_stop = (*nb.add(i + 1)).suspended;
+                        let a_stop = (*i_ptr.add(1)).suspended;
                         let i_price = (*i_ptr).price;
                         let mut stepped = false;
 
                         while a < a_stop {
-                            let a_ptr = ab.add(a);
-                            if (*a_ptr).res_capacity > 0 {
-                                let j = (*a_ptr).head;
-                                let j_ptr = nb.add(j);
-                                let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                            if (*a).res_capacity > 0 {
+                                let j_ptr = (*a).head;
+                                let rc = i_price + (*a).cost - (*j_ptr).price;
                                 if rc < 0 {
                                     let j_inp = (*j_ptr).inp;
                                     if j_inp == Color::White {
                                         (*i_ptr).current = a;
-                                        (*j_ptr).b_next = i;
-                                        i = j;
+                                        (*j_ptr).b_next = i_ptr;
+                                        i_ptr = j_ptr;
                                         stepped = true;
                                         break;
                                     }
@@ -1948,7 +1973,7 @@ impl McmfCs2 {
                                     }
                                 }
                             }
-                            a += 1;
+                            a = a.add(1);
                         }
 
                         if stepped {
@@ -1958,13 +1983,14 @@ impl McmfCs2 {
                         (*i_ptr).inp = Color::Black;
                         self.n_prscan1 += 1;
                         let j = (*i_ptr).b_next;
-                        self.stackq_push(i);
-                        if j == NONE {
+                        self.stackq_push(i_ptr);
+                        if j.is_null() {
                             break 'dfs;
                         }
-                        i = j;
-                        (*nb.add(i)).current += 1;
+                        i_ptr = j;
+                        (*i_ptr).current = (*i_ptr).current.add(1);
                     }
+                    root = root.add(1);
                 }
 
                 if !cycle_free {
@@ -1974,18 +2000,15 @@ impl McmfCs2 {
 
                 while self.nonempty_stackq() {
                     self.n_prscan2 += 1;
-                    let i = self.stackq_pop();
-                    let i_ptr = nb.add(i);
+                    let i_ptr = self.stackq_pop();
                     let i_rank = (*i_ptr).rank;
                     let i_price = (*i_ptr).price;
-                    let a_start = (*i_ptr).suspended;
-                    let a_stop = (*nb.add(i + 1)).suspended;
-                    for a in a_start..a_stop {
-                        let a_ptr = ab.add(a);
-                        if (*a_ptr).res_capacity > 0 {
-                            let j = (*a_ptr).head;
-                            let j_ptr = nb.add(j);
-                            let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                    let mut a = (*i_ptr).suspended;
+                    let a_stop = (*i_ptr.add(1)).suspended;
+                    while a < a_stop {
+                        if (*a).res_capacity > 0 {
+                            let j_ptr = (*a).head;
+                            let rc = i_price + (*a).cost - (*j_ptr).price;
                             if rc < 0 {
                                 let dr = -rc;
                                 let j_rank = dr + i_rank;
@@ -1994,12 +2017,13 @@ impl McmfCs2 {
                                 }
                             }
                         }
+                        a = a.add(1);
                     }
                     if i_rank > 0 {
                         if i_rank as usize > bmax {
                             bmax = i_rank as usize;
                         }
-                        self.insert_to_bucket(i, i_rank as usize);
+                        self.insert_to_bucket(i_ptr, i_rank as usize);
                     }
                 }
 
@@ -2013,21 +2037,18 @@ impl McmfCs2 {
                     let dp = i_rank;
 
                     while self.nonempty_bucket(b) {
-                        let i = self.get_from_bucket(b);
-                        let i_ptr = nb.add(i);
+                        let i_ptr = self.get_from_bucket(b);
                         self.n_prscan += 1;
 
                         let i_price = (*i_ptr).price;
-                        let a_start = (*i_ptr).suspended;
-                        let a_stop = (*nb.add(i + 1)).suspended;
-                        for a in a_start..a_stop {
-                            let a_ptr = ab.add(a);
-                            if (*a_ptr).res_capacity > 0 {
-                                let j = (*a_ptr).head;
-                                let j_ptr = nb.add(j);
+                        let mut a = (*i_ptr).suspended;
+                        let a_stop = (*i_ptr.add(1)).suspended;
+                        while a < a_stop {
+                            if (*a).res_capacity > 0 {
+                                let j_ptr = (*a).head;
                                 let j_rank = (*j_ptr).rank;
                                 if j_rank < i_rank {
-                                    let rc = i_price + (*a_ptr).cost - (*j_ptr).price;
+                                    let rc = i_price + (*a).cost - (*j_ptr).price;
                                     let j_new_rank = if rc < 0 {
                                         i_rank
                                     } else {
@@ -2041,12 +2062,13 @@ impl McmfCs2 {
                                     if j_rank < j_new_rank && cycle_free {
                                         (*j_ptr).rank = j_new_rank;
                                         if j_rank > 0 {
-                                            self.remove_from_bucket(j, j_rank as usize);
+                                            self.remove_from_bucket(j_ptr, j_rank as usize);
                                         }
-                                        self.insert_to_bucket(j, j_new_rank as usize);
+                                        self.insert_to_bucket(j_ptr, j_new_rank as usize);
                                     }
                                 }
                             }
+                            a = a.add(1);
                         }
 
                         (*i_ptr).price -= dp;
@@ -2072,30 +2094,32 @@ impl McmfCs2 {
     fn price_out(&mut self) {
         // SAFETY: called from cs2 after cs2_initialize.
         unsafe {
-            let nb = self.nodes_base;
-            let ab = self.arcs_base;
+            let arcs_base = self.arcs_base;
             let n_cut_off = -self.cut_off;
             let cut_off = self.cut_off;
+            let sentinel_node = self.sentinel_node;
 
-            for i in 0..self.sentinel_node {
-                let i_ptr = nb.add(i);
-                let a_stop = (*nb.add(i + 1)).suspended;
+            let mut i_ptr = self.nodes_base;
+            while i_ptr < sentinel_node {
+                let a_stop = (*i_ptr.add(1)).suspended;
                 let i_price = (*i_ptr).price;
                 let mut a = (*i_ptr).first;
                 while a < a_stop {
-                    let a_ptr = ab.add(a);
-                    let j = (*a_ptr).head;
-                    let rc = (i_price + (*a_ptr).cost - (*nb.add(j)).price) as f64;
-                    let sister = (*a_ptr).sister;
-                    if (rc > cut_off && (*ab.add(sister)).res_capacity <= 0)
-                        || (rc < n_cut_off && (*a_ptr).res_capacity <= 0)
+                    let j_ptr = (*a).head;
+                    let rc = (i_price + (*a).cost - (*j_ptr).price) as f64;
+                    let sister = (*a).sister;
+                    if (rc > cut_off && (*sister).res_capacity <= 0)
+                        || (rc < n_cut_off && (*a).res_capacity <= 0)
                     {
                         let b = (*i_ptr).first;
-                        (*i_ptr).first += 1;
-                        self.exchange(a, b);
+                        (*i_ptr).first = b.add(1);
+                        let a_idx = a.offset_from(arcs_base) as usize;
+                        let b_idx = b.offset_from(arcs_base) as usize;
+                        self.exchange(a_idx, b_idx);
                     }
-                    a += 1;
+                    a = a.add(1);
                 }
+                i_ptr = i_ptr.add(1);
             }
         }
     }
@@ -2117,9 +2141,14 @@ impl McmfCs2 {
     /// Checks the feasibility of the proposed problem.
     fn is_feasible(&mut self) -> bool {
         let mut ans = true;
-        for i in 0..self.sentinel_node {
-            let a_start = self.nodes[i].suspended;
-            let a_stop = self.nodes[i + 1].suspended;
+        let arcs_base = self.arcs_base;
+        let nodes_base = self.nodes_base;
+        for i in 0..self.n {
+            // SAFETY: post-cs2_initialize, all .suspended pointers are valid.
+            let a_start =
+                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop =
+                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
                     let fa = self.cap[a] - self.arcs[a].res_capacity;
@@ -2128,12 +2157,13 @@ impl McmfCs2 {
                         break;
                     }
                     self.node_balance[i] -= fa;
-                    let head = self.arcs[a].head;
-                    self.node_balance[head] += fa;
+                    let head_idx =
+                        unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
+                    self.node_balance[head_idx] += fa;
                 }
             }
         }
-        for i in 0..self.sentinel_node {
+        for i in 0..self.n {
             if self.node_balance[i] != 0 {
                 ans = false;
                 break;
@@ -2147,12 +2177,16 @@ impl McmfCs2 {
     /// If true, then the problem is possibly feasible,
     /// otherwise the problem is unfeasible.
     fn check_cs(&self) -> bool {
-        for i in 0..self.sentinel_node {
-            let a_start = self.nodes[i].suspended;
-            let a_stop = self.nodes[i + 1].suspended;
+        let arcs_base = self.arcs_base;
+        let nodes_base = self.nodes_base;
+        for i in 0..self.n {
+            let a_start =
+                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop =
+                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.arcs[a].res_capacity > 0 {
-                    let j = self.arcs[a].head;
+                    let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                     if rc < 0 {
                         return false;
@@ -2173,16 +2207,22 @@ impl McmfCs2 {
         println!("c");
         println!("s 0"); // cost printed separately
 
+        let arcs_base = self.arcs_base;
+        let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
-            let a_start = self.nodes[i].suspended;
-            let a_stop = self.nodes[i + 1].suspended;
+            let a_start =
+                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop =
+                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
+                    let head_idx =
+                        unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     println!(
                         "f {:7} {:7} {:10}",
                         ni,
-                        n_node(self.arcs[a].head, self.node_min),
+                        n_node(head_idx, self.node_min),
                         self.cap[a] - self.arcs[a].res_capacity
                     );
                 }
@@ -2191,10 +2231,10 @@ impl McmfCs2 {
 
         if comp_duals {
             let mut min_price = MAX_32;
-            for i in 0..self.sentinel_node {
+            for i in 0..self.n {
                 min_price = min_price.min(self.nodes[i].price);
             }
-            for i in 0..self.sentinel_node {
+            for i in 0..self.n {
                 println!(
                     "p {:7} {:7}",
                     n_node(i, self.node_min),
@@ -2208,17 +2248,23 @@ impl McmfCs2 {
     /// Prints the graph structure to stdout (for debugging).
     fn print_graph(&self) {
         println!("\nGraph: {}", self.n);
+        let arcs_base = self.arcs_base;
+        let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
             println!("\nNode {ni}");
-            let a_start = self.nodes[i].suspended;
-            let a_stop = self.nodes[i + 1].suspended;
+            let a_start =
+                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop =
+                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
+                let head_idx =
+                    unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                 println!(
                     " {{{}}} {} -> {}  cap: {}  cost: {}",
                     a,
                     ni,
-                    n_node(self.arcs[a].head, self.node_min),
+                    n_node(head_idx, self.node_min),
                     self.cap[a],
                     self.arcs[a].cost
                 );
@@ -2236,18 +2282,22 @@ impl McmfCs2 {
     fn finishup(&mut self, objective_cost: &mut f64, comp_duals: bool) {
         // remove zero-cost cycle markers
         if self.no_zero_cycles {
-            for a in 0..self.sentinel_arc {
-                if self.arcs[a].cost == 1 {
-                    let sister = self.arcs[a].sister;
-                    assert!(self.arcs[sister].cost == -1);
-                    self.arcs[a].cost = 0;
-                    self.arcs[sister].cost = 0;
+            // SAFETY: arcs_base valid post-cs2_initialize.
+            unsafe {
+                for a in 0..self.m {
+                    let arc = self.arcs_base.add(a);
+                    if (*arc).cost == 1 {
+                        let sister = (*arc).sister;
+                        assert!((*sister).cost == -1);
+                        (*arc).cost = 0;
+                        (*sister).cost = 0;
+                    }
                 }
             }
         }
 
         let mut obj_internal: f64 = 0.0;
-        for a in 0..self.sentinel_arc {
+        for a in 0..self.m {
             let cs = self.arcs[a].cost / self.dn;
             if self.cap[a] > 0 {
                 let flow = self.cap[a] - self.arcs[a].res_capacity;
@@ -2258,7 +2308,7 @@ impl McmfCs2 {
             self.arcs[a].cost = cs;
         }
 
-        for i in 0..self.sentinel_node {
+        for i in 0..self.n {
             self.nodes[i].price /= self.dn;
         }
 
@@ -2488,14 +2538,20 @@ impl McmfSolution {
     /// Iterate over original (forward) arcs yielding (tail, head, flow)
     pub fn flows(&self) -> impl Iterator<Item = (usize, usize, i64)> {
         let s = &self.solver;
+        let arcs_base = s.arcs_base;
+        let nodes_base = s.nodes_base;
         (0..s.n).flat_map(move |i| {
-            let a_start = s.nodes[i].suspended;
-            let a_stop = s.nodes[i + 1].suspended;
+            // SAFETY: pointers stored in node fields are valid arcs/nodes
+            // offsets after cs2_initialize.
+            let a_start = unsafe { s.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop = unsafe { s.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             (a_start..a_stop).filter_map(move |a| {
                 if s.cap[a] > 0 {
                     let flow = s.cap[a] - s.arcs[a].res_capacity;
                     let tail = n_node(i, s.node_min) as usize;
-                    let head = n_node(s.arcs[a].head, s.node_min) as usize;
+                    let head_idx =
+                        unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
+                    let head = n_node(head_idx, s.node_min) as usize;
                     Some((tail, head, flow))
                 } else {
                     None
@@ -2508,7 +2564,7 @@ impl McmfSolution {
     /// Only meaningful if comp_duals was enabled.
     pub fn prices(&self) -> impl Iterator<Item = (usize, Price)> {
         let s = &self.solver;
-        (0..s.sentinel_node).map(move |i| (n_node(i, s.node_min) as usize, s.nodes[i].price))
+        (0..s.n).map(move |i| (n_node(i, s.node_min) as usize, s.nodes[i].price))
     }
 
     /// Returns statistics of the solution.
