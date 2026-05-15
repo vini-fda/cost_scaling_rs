@@ -109,12 +109,15 @@ pub fn parse(input: &str) -> Result<DimacsMin, ParseError> {
         }
 
         let mut parts = trimmed.split_whitespace();
-        let kind = parts.next().unwrap(); // non-empty after trim check
+        let Some(kind) = parts.next() else {
+            continue; // unreachable after the is_empty check above, but keeps us total
+        };
 
         match kind {
             "c" => {
-                // Everything after "c " is the comment text.
-                let text = trimmed.strip_prefix("c").unwrap().trim_start();
+                // Everything after the leading "c" is the comment text. The first whitespace-split
+                // token being "c" guarantees `trimmed` starts with "c".
+                let text = trimmed.strip_prefix("c").unwrap_or(trimmed).trim_start();
                 comments.push(text.to_string());
             }
             "p" => {

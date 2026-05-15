@@ -11,7 +11,7 @@ fn goto_problem(n: i64) -> String {
         max_cost: 100,
         seed: 42,
     };
-    generate_to_string(&params).unwrap()
+    generate_to_string(&params).expect("failed to generate GOTO problem")
 }
 
 fn bench_goto(c: &mut Criterion) {
@@ -20,8 +20,10 @@ fn bench_goto(c: &mut Criterion) {
         let input = goto_problem(size);
         group.bench_with_input(BenchmarkId::from_parameter(size), &input, |b, input| {
             b.iter(|| {
-                let solver = McmfCs2::from_dimacs(input).unwrap();
-                solver.min_cost(false, false).unwrap()
+                let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
+                solver
+                    .min_cost(false, false)
+                    .expect("failed to solve min-cost flow")
             });
         });
     }
