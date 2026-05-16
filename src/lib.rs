@@ -49,7 +49,7 @@ const PRICE_MAX: Price = MAX_64;
 const UPDT_FREQ: f64 = 0.4;
 const UPDT_FREQ_S: f64 = 30.0;
 const SCALE_DEFAULT: f64 = 12.0;
-/// PRICE_OUT_START may not be less than 1
+/// `PRICE_OUT_START` may not be less than 1
 const PRICE_OUT_START: u64 = 1;
 const CUT_OFF_POWER: f64 = 0.44;
 const CUT_OFF_COEF: f64 = 1.5;
@@ -105,7 +105,7 @@ struct Node {
     b_prev: *mut Node,
     /// Bucket number.
     rank: i64,
-    /// DFS visit color (White/Grey/Black) used in price_refine and compute_prices.
+    /// DFS visit color (White/Grey/Black) used in `price_refine` and `compute_prices`.
     inp: Color,
 }
 
@@ -351,7 +351,7 @@ pub struct McmfCs2 {
     buckets_base: *mut Bucket,
     /// Last bucket index.
     l_bucket: BucketIndex,
-    /// Number of l_bucket + 1.
+    /// Number of `l_bucket` + 1.
     linf: usize,
     time_for_price_in: i32,
 
@@ -365,7 +365,7 @@ pub struct McmfCs2 {
     mmc: Price,
     /// Scale factor.
     f_scale: f64,
-    /// Multiplier to produce cut_on and cut_off from n and epsilon.
+    /// Multiplier to produce `cut_on` and `cut_off` from n and epsilon.
     cut_off_factor: f64,
     /// The bound for returning suspended arcs.
     cut_on: f64,
@@ -518,6 +518,7 @@ impl TryFrom<parser::DimacsMin> for McmfCs2 {
 
 impl McmfCs2 {
     /// Create a new solver for a network with `num_nodes` nodes and `num_arcs` arcs.
+    #[must_use]
     pub fn new(num_nodes: usize, num_arcs: usize) -> Self {
         let mut solver = McmfCs2 {
             n: num_nodes,
@@ -631,6 +632,8 @@ impl McmfCs2 {
     /// Caller must pass valid node/arc pointers (i.e., into the live arenas).
     #[inline(always)]
     unsafe fn increase_flow(&mut self, i: *mut Node, j: *mut Node, a: *mut Arc, df: i64) {
+        // SAFETY: upheld by this function's safety contract: `i`, `j`, `a`,
+        // and `(*a).sister` all point into the live node/arc arenas.
         unsafe {
             (*i).excess -= df;
             (*j).excess += df;
@@ -655,6 +658,8 @@ impl McmfCs2 {
     /// Requires base pointers to be set (post-[`Self::cs2_initialize`]).
     #[inline(always)]
     unsafe fn reset_excess_q(&mut self) {
+        // SAFETY: upheld by this function's safety contract: `excq_first`
+        // forms a valid linked list of node pointers terminated by null.
         unsafe {
             while !self.excq_first.is_null() {
                 let next = (*self.excq_first).q_next;
@@ -671,6 +676,7 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn out_of_excess_q(&self, i: *mut Node) -> bool {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { (*i).q_next == self.sentinel_node }
     }
 
@@ -692,6 +698,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn insert_to_excess_q(&mut self, i: *mut Node) {
+        // SAFETY: upheld by this function's safety contract; `excq_last` is
+        // valid whenever `nonempty_excess_q()` returns true.
         unsafe {
             if self.nonempty_excess_q() {
                 (*self.excq_last).q_next = i;
@@ -709,6 +717,8 @@ impl McmfCs2 {
     /// Caller must ensure the queue is non-empty.
     #[inline(always)]
     unsafe fn remove_from_excess_q(&mut self) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract: a non-empty
+        // queue guarantees `excq_first` is a valid node pointer.
         unsafe {
             let i = self.excq_first;
             self.excq_first = (*i).q_next;
@@ -736,6 +746,7 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn reset_stackq(&mut self) {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { self.reset_excess_q() };
     }
 
@@ -745,6 +756,7 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn stackq_push(&mut self, i: *mut Node) {
+        // SAFETY: upheld by this function's safety contract.
         unsafe {
             (*i).q_next = self.excq_first;
             self.excq_first = i;
@@ -757,6 +769,7 @@ impl McmfCs2 {
     /// Caller must ensure the stack is non-empty.
     #[inline(always)]
     unsafe fn stackq_pop(&mut self) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { self.remove_from_excess_q() }
     }
 
@@ -770,6 +783,8 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn reset_bucket(&mut self, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract: `buckets_base`
+        // points to a live buckets arena of length > `b`.
         unsafe { (*self.buckets_base.add(b)).p_first = self.dnode };
     }
 
@@ -779,6 +794,7 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn nonempty_bucket(&self, b: BucketIndex) -> bool {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { (*self.buckets_base.add(b)).p_first != self.dnode }
     }
 
@@ -788,6 +804,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
     unsafe fn insert_to_bucket(&mut self, i: *mut Node, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract; `old_first` is
+        // either a valid node pointer or the `dnode` sentinel.
         unsafe {
             let bucket = self.buckets_base.add(b);
             let old_first = (*bucket).p_first;
@@ -805,6 +823,8 @@ impl McmfCs2 {
     /// Caller must ensure bucket `b` is non-empty.
     #[inline(always)]
     unsafe fn get_from_bucket(&mut self, b: BucketIndex) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract: a non-empty
+        // bucket guarantees `(*bucket).p_first` is a valid node pointer.
         unsafe {
             let bucket = self.buckets_base.add(b);
             let i = (*bucket).p_first;
@@ -819,6 +839,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
     unsafe fn remove_from_bucket(&mut self, i: *mut Node, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract; `b_prev` /
+        // `b_next` form a valid doubly linked list inside the bucket.
         unsafe {
             let bucket = self.buckets_base.add(b);
             if i == (*bucket).p_first {
@@ -1124,18 +1146,22 @@ impl McmfCs2 {
         }
 
         // overflow test (computed but not enforced, matching C++)
-        // SAFETY: arcs_base set in allocate_arrays; .first pointers are
-        // valid arcs base offsets.
         for ndp in self.node_min..=self.node_max {
             let mut _cap_in: Excess = self.nodes[ndp].excess;
             let mut _cap_out: Excess = -self.nodes[ndp].excess;
+            // SAFETY: allocate_arrays stored `node.first` as a pointer into
+            // the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[ndp].first.offset_from(self.arcs_base) as usize };
+            // SAFETY: same allocation invariant as `a_start`; the trailing
+            // sentinel at `self.nodes[node_max + 1]` keeps `ndp + 1` in-bounds.
             let a_end = unsafe { self.nodes[ndp + 1].first.offset_from(self.arcs_base) as usize };
             for ac in a_start..a_end {
                 if self.cap[ac] > 0 {
                     _cap_out += self.cap[ac];
                 }
                 if self.cap[ac] == 0 {
+                    // SAFETY: every `.sister` pointer is an offset into
+                    // the live `arcs_base` arena.
                     let sister_idx =
                         unsafe { self.arcs[ac].sister.offset_from(self.arcs_base) as usize };
                     _cap_in += self.cap[sister_idx];
@@ -1633,19 +1659,19 @@ impl McmfCs2 {
                             let df = (*a).res_capacity;
                             self.increase_flow(i_ptr, j_ptr, a, df);
 
-                            let ra = (*a).sister;
-                            let j2_ptr = (*a).head;
+                            let reverse_arc = (*a).sister;
 
                             (*i_ptr).first = (*i_ptr).first.sub(1);
                             let b_idx = (*i_ptr).first.offset_from(arcs_base) as usize;
                             let a_idx = a.offset_from(arcs_base) as usize;
                             self.exchange(a_idx, b_idx);
 
-                            if ra < (*j2_ptr).first {
-                                (*j2_ptr).first = (*j2_ptr).first.sub(1);
-                                let rb_idx = (*j2_ptr).first.offset_from(arcs_base) as usize;
-                                let ra_idx = ra.offset_from(arcs_base) as usize;
-                                self.exchange(ra_idx, rb_idx);
+                            if reverse_arc < (*j_ptr).first {
+                                (*j_ptr).first = (*j_ptr).first.sub(1);
+                                let reverse_first_idx =
+                                    (*j_ptr).first.offset_from(arcs_base) as usize;
+                                let reverse_arc_idx = reverse_arc.offset_from(arcs_base) as usize;
+                                self.exchange(reverse_arc_idx, reverse_first_idx);
                             }
 
                             n_in_bad += 1;
@@ -1767,14 +1793,13 @@ impl McmfCs2 {
                         while self.flag_updt != UpdateFlag::Ok {
                             if self.n_ref == 1 {
                                 return Err(Cs2Error::Infeasible);
-                            } else {
-                                self.flag_updt = UpdateFlag::Ok;
-                                self.update_cut_off();
-                                self.n_bad_relabel += 1;
-                                pr_in_int = 0;
-                                self.price_in();
-                                self.price_update();
                             }
+                            self.flag_updt = UpdateFlag::Ok;
+                            self.update_cut_off();
+                            self.n_bad_relabel += 1;
+                            pr_in_int = 0;
+                            self.price_in();
+                            self.price_update();
                         }
                         self.n_rel = 0;
 
@@ -2284,8 +2309,11 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
-            // SAFETY: post-cs2_initialize, all .suspended pointers are valid.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same allocation invariant as `a_start`; the trailing
+            // sentinel at `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
@@ -2295,6 +2323,8 @@ impl McmfCs2 {
                         break;
                     }
                     self.node_balance[i] -= fa;
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     self.node_balance[head_idx] += fa;
                 }
@@ -2317,10 +2347,16 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.arcs[a].res_capacity > 0 {
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                     if rc < 0 {
@@ -2334,7 +2370,7 @@ impl McmfCs2 {
 
     /// Prints the solution.
     ///
-    /// comp_duals: whether to compute the prices.
+    /// `comp_duals`: whether to compute the prices.
     fn print_solution(&self, comp_duals: bool) {
         if !self.print_ans {
             return;
@@ -2346,10 +2382,16 @@ impl McmfCs2 {
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     println!(
                         "f {:7} {:7} {:10}",
@@ -2385,9 +2427,15 @@ impl McmfCs2 {
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
             println!("\nNode {ni}");
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
+                // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                // into the same allocation as `nodes_base`.
                 let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                 println!(
                     " {{{}}} {} -> {}  cap: {}  cost: {}",
@@ -2461,7 +2509,7 @@ impl McmfCs2 {
     /// 3. Reduces epsilon by the scale factor.
     /// 4. Attempts [`price_refine`](Self::price_refine) to skip full refine
     ///    iterations when prices alone can establish optimality at the new
-    ///    epsilon. Falls back to refine if price_refine detects a cycle.
+    ///    epsilon. Falls back to refine if `price_refine` detects a cycle.
     ///
     /// Terminates when `epsilon < 1`, at which point the flow is optimal.
     #[inline(never)]
@@ -2510,8 +2558,13 @@ impl McmfCs2 {
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, printing the solution.
     ///
     /// Args
-    /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    /// - comp_duals: Enable to compute prices
+    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
+    /// - `comp_duals`: Enable to compute prices
+    ///
+    /// # Errors
+    /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
+    /// circulation, or any other [`Cs2Error`] variant produced by the
+    /// preprocessing / cost-scaling phases.
     pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing()?;
@@ -2585,11 +2638,16 @@ impl McmfCs2 {
     }
 
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, returning the solution
-    /// as a [McmfSolution] object.
+    /// as a [`McmfSolution`] object.
     ///
     /// Args
-    /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    /// - comp_duals: Enable to compute prices
+    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
+    /// - `comp_duals`: Enable to compute prices
+    ///
+    /// # Errors
+    /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
+    /// circulation, or any other [`Cs2Error`] variant produced by the
+    /// preprocessing / cost-scaling phases.
     pub fn min_cost(
         mut self,
         check_solution: bool,
@@ -2672,14 +2730,18 @@ impl McmfSolution {
         let arcs_base = s.arcs_base;
         let nodes_base = s.nodes_base;
         (0..s.n).flat_map(move |i| {
-            // SAFETY: pointers stored in node fields are valid arcs/nodes
-            // offsets after cs2_initialize.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { s.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `s.nodes[s.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { s.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             (a_start..a_stop).filter_map(move |a| {
                 if s.cap[a] > 0 {
                     let flow = s.cap[a] - s.arcs[a].res_capacity;
                     let tail = n_node(i, s.node_min) as usize;
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
                     let head = n_node(head_idx, s.node_min) as usize;
                     Some((tail, head, flow))
@@ -2690,14 +2752,15 @@ impl McmfSolution {
         })
     }
 
-    /// Iterate over node prices yielding (node_id, price).
-    /// Only meaningful if comp_duals was enabled.
+    /// Iterate over node prices yielding (`node_id`, price).
+    /// Only meaningful if `comp_duals` was enabled.
     pub fn prices(&self) -> impl Iterator<Item = (usize, Price)> {
         let s = &self.solver;
         (0..s.n).map(move |i| (n_node(i, s.node_min) as usize, s.nodes[i].price))
     }
 
     /// Returns statistics of the solution.
+    #[must_use]
     pub fn stats(&self) -> McmfStats {
         let s = &self.solver;
         McmfStats {

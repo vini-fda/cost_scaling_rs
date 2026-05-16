@@ -1,0 +1,67 @@
+name: Security audit
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  # Catch newly-disclosed advisories even when dependencies don't change.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  # Bump this to force a re-install of cargo-audit (e.g. for a security fix
+  # in the tool itself). The cache key includes this value.
+  CARGO_AUDIT_VERSION: "0.22.1"
+
+jobs:
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cache the cargo-audit binary itself. The upstream
+      # `rustsec/audit-check@v2` action does `cargo install cargo-audit`
+      # on every run (~1-2 min), which dominates the audit job's runtime.
+      # Restoring a prebuilt binary turns that into a no-op.
+      - name: Cache cargo-audit binary
+        id: cache-cargo-audit
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
+
+      - name: Install cargo-audit
+        if: steps.cache-cargo-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version ${{ env.CARGO_AUDIT_VERSION }} --locked
+
+      # Cache the advisory DB too, so we don't re-clone it from GitHub on
+      # every run. cargo-audit will auto-update it if older than ~24h, so we
+      # rotate the key daily: same day = real cache hit (no re-save), new day
+      # = miss + prefix-match restore + one save. This avoids creating a new
+      # cache entry on every workflow run.
+      - name: Get date (UTC, daily)
+        id: advisory-db-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache RustSec advisory DB
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/advisory-db
+          key: rustsec-advisory-db-${{ steps.advisory-db-date.outputs.date }}
+          restore-keys: |
+            rustsec-advisory-db-
+
+      - name: Run cargo audit
+        run: cargo audit

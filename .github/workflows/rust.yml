@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-targets
+      - run: cargo check --all-targets --locked
 
   fmt:
     name: format
@@ -39,7 +39,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   test:
     name: test (${{ matrix.host_target }})
@@ -104,7 +104,8 @@ jobs:
           echo "CC_${{ matrix.host_target }}=${{ matrix.gcc_cross }}-gcc" | tee -a $GITHUB_ENV
           TARGET_UPPERCASE=$(echo ${{ matrix.host_target }} | tr '[:lower:]-' '[:upper:]_')
           echo "CARGO_TARGET_${TARGET_UPPERCASE}_LINKER=${{ matrix.gcc_cross }}-gcc" | tee -a $GITHUB_ENV
-      - run: cargo test
+      - run: cargo test --locked
+      - run: cargo test --release --locked
 
   doc:
     name: docs
@@ -115,7 +116,43 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps
+      - run: cargo doc --no-deps --document-private-items --locked
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    # Uses the official cargo-msrv image (recommended in
+    # https://gribnau.dev/cargo-msrv/ci/gitlab.html).
+    # GitHub Actions overrides the image's `cargo msrv` entrypoint via its
+    # own runtime, so explicit steps below run normally.
+    container:
+      image: foresterre/cargo-msrv:latest
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v6
+      - name: tool versions
+        run: |
+          rustc --version
+          cargo --version
+          cargo msrv --version
+      - name: verify MSRV
+        run: cargo msrv --output-format minimal verify
+
+  semver:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    # On a push to master we'd be comparing master to itself; only run
+    # on PRs targeting master.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cargo-semver-checks needs the baseline commit to be available
+          # locally; fetch full history rather than the default shallow clone.
+          fetch-depth: 0
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: origin/master
 
   miri:
     name: miri (${{ matrix.host_target }})

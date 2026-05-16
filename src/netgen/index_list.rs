@@ -9,7 +9,7 @@
 //! - [`IndexList::size`] / [`IndexList::pseudo_size`].
 //!
 //! The `pseudo_size` quirk (the list's reported "almost size" being decremented
-//! even when `remove` finds nothing) is intentional: NETGEN's [`pick_head`]
+//! even when `remove` finds nothing) is intentional: NETGEN's `pick_head`
 //! routine depends on it. The C source explicitly marks it as "an apparent bug
 //! in the original definition of the NETGEN program" that we must perpetuate.
 //!
@@ -153,11 +153,11 @@ fn remove_flag(base: u64, flags: &mut [bool], value: u64) -> bool {
         return false;
     }
     let idx = (value - base) as usize;
-    if !flags[idx] {
+    if flags[idx] {
+        false
+    } else {
         flags[idx] = true;
         true
-    } else {
-        false
     }
 }
 

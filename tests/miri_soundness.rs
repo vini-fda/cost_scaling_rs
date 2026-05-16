@@ -1,10 +1,10 @@
-//! Soundness tests for the unsafe pointer-based McmfCs2 implementation.
+//! Soundness tests for the unsafe pointer-based `McmfCs2` implementation.
 
 use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{GotoParams, generate_to_string};
 
 /// 6-node sample matching `testdata/sample.inp`. Exercises the full
-/// refine + price_refine + finishup pipeline.
+/// refine + `price_refine` + finishup pipeline.
 const SAMPLE: &str = "\
 p min 6 8
 n 1 10
@@ -20,7 +20,7 @@ a 4 6 0 8 1
 ";
 
 /// Triangle with a single source and sink. Tiny but enough to drive
-/// discharge / relabel / price_update through at least one scaling pass.
+/// discharge / relabel / `price_update` through at least one scaling pass.
 const TRIANGLE: &str = "\
 p min 3 3
 n 1 2
@@ -55,7 +55,7 @@ a 1 2 3 10 2
 a 2 3 3 10 3
 ";
 
-/// Network with a self-loop and a cycle that price_refine should handle.
+/// Network with a self-loop and a cycle that `price_refine` should handle.
 const CYCLE: &str = "\
 p min 5 7
 n 1 3
@@ -84,18 +84,30 @@ fn solve(dimacs: &str) -> f64 {
     solve_with(dimacs, true, true)
 }
 
+/// Asserts an `f64` solver cost equals an integer-valued expected cost.
+/// Inputs are integers and the algorithm only divides by an integer scale,
+/// so optimal costs are exact integers — but clippy can't prove that, so
+/// we compare with a tiny tolerance instead of using `==`.
+#[track_caller]
+fn assert_cost(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "cost {actual} != expected {expected}",
+    );
+}
+
 #[test]
 fn sample_six_node() {
     let cost = solve(SAMPLE);
     // Known optimal cost for the sample input.
-    assert_eq!(cost, 70.0);
+    assert_cost(cost, 70.0);
 }
 
 #[test]
 fn triangle() {
     let cost = solve(TRIANGLE);
     // 2 units source→sink. Cheapest is via 1→2→3 at cost (1+1)*2 = 4.
-    assert_eq!(cost, 4.0);
+    assert_cost(cost, 4.0);
 }
 
 #[test]
@@ -116,7 +128,7 @@ fn lower_bounds() {
     // Forced flow: 3 units through 1->2 (lower) + 3 through 2->3 (lower),
     // plus 7 more units balancing 1's supply (10) to 3's demand (-10),
     // along the only path: cost = 10*(2+3) = 50.
-    assert_eq!(cost, 50.0);
+    assert_cost(cost, 50.0);
 }
 
 #[test]
@@ -150,8 +162,8 @@ fn programmatic_build() {
 #[test]
 fn repeated_solves() {
     for _ in 0..3 {
-        assert_eq!(solve(SAMPLE), 70.0);
-        assert_eq!(solve(TRIANGLE), 4.0);
+        assert_cost(solve(SAMPLE), 70.0);
+        assert_cost(solve(TRIANGLE), 4.0);
     }
 }
 

@@ -23,6 +23,7 @@
 
 use cost_scaling_rs::netgen::{NetgenParams, generate, write_dimacs};
 use std::io::{self, BufWriter, Read};
+use std::str::SplitAsciiWhitespace;
 
 fn main() {
     let mut input = String::new();
@@ -35,26 +36,21 @@ fn main() {
     let mut out = BufWriter::new(stdout.lock());
 
     loop {
-        let seed = match next_i64(&mut tokens) {
-            Some(v) => v,
-            None => return,
+        let Some(seed) = next_i64(&mut tokens) else {
+            return;
         };
         if seed <= 0 {
             return;
         }
-        let problem = match next_i64(&mut tokens) {
-            Some(v) => v,
-            None => return,
+        let Some(problem) = next_i64(&mut tokens) else {
+            return;
         };
         if problem <= 0 {
             return;
         }
-        let params = match read_params(&mut tokens) {
-            Some(p) => p,
-            None => {
-                eprintln!("netgen: truncated parameter record");
-                std::process::exit(1);
-            }
+        let Some(params) = read_params(&mut tokens) else {
+            eprintln!("netgen: truncated parameter record");
+            std::process::exit(1);
         };
         let inst = match generate(seed, params) {
             Ok(i) => i,
@@ -72,15 +68,15 @@ fn main() {
     }
 }
 
-fn next_i64<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<i64> {
+fn next_i64(tokens: &mut SplitAsciiWhitespace<'_>) -> Option<i64> {
     tokens.next().and_then(|t| t.parse::<i64>().ok())
 }
 
-fn next_u64<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<u64> {
+fn next_u64(tokens: &mut SplitAsciiWhitespace<'_>) -> Option<u64> {
     tokens.next().and_then(|t| t.parse::<u64>().ok())
 }
 
-fn read_params<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<NetgenParams> {
+fn read_params(tokens: &mut SplitAsciiWhitespace<'_>) -> Option<NetgenParams> {
     Some(NetgenParams {
         nodes: next_u64(tokens)?,
         sources: next_u64(tokens)?,

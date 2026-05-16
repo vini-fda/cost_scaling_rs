@@ -6,6 +6,7 @@
 use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{self, GotoParams};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Once;
@@ -137,16 +138,18 @@ fn compare(name: &str, input: &str) {
 
     if !cost_match || rust.flows != c.flows {
         let mut msg = format!("MISMATCH in {name}\n");
-        msg.push_str(&format!(
-            "  Objective cost: Rust={:.0}  C={:.0}  {}\n",
+        writeln!(
+            msg,
+            "  Objective cost: Rust={:.0}  C={:.0}  {}",
             rust.cost,
             c.cost,
             if cost_match { "OK" } else { "DIFFER" }
-        ));
+        )
+        .expect("write to String");
 
         // Collect all arc keys
-        let mut all_keys: Vec<_> = rust.flows.keys().chain(c.flows.keys()).cloned().collect();
-        all_keys.sort();
+        let mut all_keys: Vec<_> = rust.flows.keys().chain(c.flows.keys()).copied().collect();
+        all_keys.sort_unstable();
         all_keys.dedup();
 
         let mut flow_diffs = Vec::new();
@@ -158,10 +161,8 @@ fn compare(name: &str, input: &str) {
             }
         }
         if !flow_diffs.is_empty() {
-            msg.push_str(&format!(
-                "  Flow differences ({} arcs):\n",
-                flow_diffs.len()
-            ));
+            writeln!(msg, "  Flow differences ({} arcs):", flow_diffs.len())
+                .expect("write to String");
             for d in &flow_diffs {
                 msg.push_str(d);
                 msg.push('\n');
@@ -702,7 +703,7 @@ fn edge_infeasible_disconnected() {
     assert!(solver.min_cost(false, false).is_err());
 }
 
-/// Feasible with check_solution enabled: verifies internal consistency.
+/// Feasible with `check_solution` enabled: verifies internal consistency.
 #[test]
 fn edge_check_solution_passes() {
     let input = "\

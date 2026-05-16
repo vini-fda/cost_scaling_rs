@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--size" => {
                 i += 1;
-                problem_size = raw_args.get(i).ok_or("--size requires a value")?.clone();
+                problem_size.clone_from(raw_args.get(i).ok_or("--size requires a value")?);
                 i += 1;
             }
             other => {
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = PathBuf::from(DATA_DIR);
     let has_data = data_dir.is_dir()
         && fs::read_dir(&data_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .any(|e| e.path().extension().and_then(OsStr::to_str) == Some("min"));
 
     if !has_data {
@@ -112,31 +112,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     let prefix = format!("goto_{problem_size}n_");
     let problem = fs::read_dir(&data_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.path())
         .find(|p| {
-            p.file_name()
-                .and_then(OsStr::to_str)
-                .map(|n| n.starts_with(&prefix) && n.ends_with(".min"))
-                .unwrap_or(false)
+            p.extension().and_then(OsStr::to_str) == Some("min")
+                && p.file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|n| n.starts_with(&prefix))
         });
 
-    let problem = match problem {
-        Some(p) => p,
-        None => {
-            eprintln!("Error: No problem file found for size {problem_size}.");
-            eprintln!("Available:");
-            let mut available: Vec<PathBuf> = fs::read_dir(&data_dir)?
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().and_then(OsStr::to_str) == Some("min"))
-                .collect();
-            available.sort();
-            for p in &available {
-                eprintln!("  {}", p.display());
-            }
-            return Err(format!("no problem file for size {problem_size}").into());
+    let Some(problem) = problem else {
+        eprintln!("Error: No problem file found for size {problem_size}.");
+        eprintln!("Available:");
+        let mut available: Vec<PathBuf> = fs::read_dir(&data_dir)?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(OsStr::to_str) == Some("min"))
+            .collect();
+        available.sort();
+        for p in &available {
+            eprintln!("  {}", p.display());
         }
+        return Err(format!("no problem file for size {problem_size}").into());
     };
 
     let filename = problem
@@ -178,8 +175,7 @@ fn check_dep(name: &str, hint: &str) -> Result<(), Box<dyn std::error::Error>> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     if found {
         Ok(())
     } else {
