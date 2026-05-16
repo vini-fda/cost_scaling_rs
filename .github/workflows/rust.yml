@@ -118,6 +118,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --document-private-items
 
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    # Uses the official cargo-msrv image (recommended in
+    # https://gribnau.dev/cargo-msrv/usage/use-in-ci-pipeline.html).
+    # GitHub Actions overrides the image's `cargo msrv` entrypoint via its
+    # own runtime, so explicit steps below run normally.
+    container:
+      image: foresterre/cargo-msrv:latest
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v6
+      - name: tool versions
+        run: |
+          rustc --version
+          cargo --version
+          cargo msrv --version
+      - name: verify MSRV
+        run: cargo msrv --output-format minimal verify
+
   miri:
     name: miri (${{ matrix.host_target }})
     runs-on: ${{ matrix.os }}
