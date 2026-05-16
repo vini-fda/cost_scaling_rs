@@ -153,11 +153,11 @@ fn remove_flag(base: u64, flags: &mut [bool], value: u64) -> bool {
         return false;
     }
     let idx = (value - base) as usize;
-    if !flags[idx] {
+    if flags[idx] {
+        false
+    } else {
         flags[idx] = true;
         true
-    } else {
-        false
     }
 }
 

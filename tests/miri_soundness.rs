@@ -1,10 +1,10 @@
-//! Soundness tests for the unsafe pointer-based McmfCs2 implementation.
+//! Soundness tests for the unsafe pointer-based `McmfCs2` implementation.
 
 use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{GotoParams, generate_to_string};
 
 /// 6-node sample matching `testdata/sample.inp`. Exercises the full
-/// refine + price_refine + finishup pipeline.
+/// refine + `price_refine` + finishup pipeline.
 const SAMPLE: &str = "\
 p min 6 8
 n 1 10
@@ -20,7 +20,7 @@ a 4 6 0 8 1
 ";
 
 /// Triangle with a single source and sink. Tiny but enough to drive
-/// discharge / relabel / price_update through at least one scaling pass.
+/// discharge / relabel / `price_update` through at least one scaling pass.
 const TRIANGLE: &str = "\
 p min 3 3
 n 1 2
@@ -55,7 +55,7 @@ a 1 2 3 10 2
 a 2 3 3 10 3
 ";
 
-/// Network with a self-loop and a cycle that price_refine should handle.
+/// Network with a self-loop and a cycle that `price_refine` should handle.
 const CYCLE: &str = "\
 p min 5 7
 n 1 3

@@ -597,8 +597,7 @@ pub fn generate_to_stdout(params: &GotoParams) -> Result<(), GotoError> {
         adapter
             .error
             .take()
-            .map(GotoError::Io)
-            .unwrap_or(GotoError::Fmt(fmt::Error))
+            .map_or(GotoError::Fmt(fmt::Error), GotoError::Io)
     })?;
     adapter.into_io_result()?;
     Ok(())
@@ -615,8 +614,7 @@ pub fn generate_to_file(params: &GotoParams, path: &Path) -> Result<(), GotoErro
         adapter
             .error
             .take()
-            .map(GotoError::Io)
-            .unwrap_or(GotoError::Fmt(fmt::Error))
+            .map_or(GotoError::Fmt(fmt::Error), GotoError::Io)
     })?;
     adapter.into_io_result()?;
     Ok(())

@@ -145,8 +145,8 @@ fn compare(name: &str, input: &str) {
         ));
 
         // Collect all arc keys
-        let mut all_keys: Vec<_> = rust.flows.keys().chain(c.flows.keys()).cloned().collect();
-        all_keys.sort();
+        let mut all_keys: Vec<_> = rust.flows.keys().chain(c.flows.keys()).copied().collect();
+        all_keys.sort_unstable();
         all_keys.dedup();
 
         let mut flow_diffs = Vec::new();
@@ -702,7 +702,7 @@ fn edge_infeasible_disconnected() {
     assert!(solver.min_cost(false, false).is_err());
 }
 
-/// Feasible with check_solution enabled: verifies internal consistency.
+/// Feasible with `check_solution` enabled: verifies internal consistency.
 #[test]
 fn edge_check_solution_passes() {
     let input = "\

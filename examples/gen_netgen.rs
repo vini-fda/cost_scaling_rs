@@ -50,12 +50,11 @@ fn main() {
         if problem <= 0 {
             return;
         }
-        let params = match read_params(&mut tokens) {
-            Some(p) => p,
-            None => {
-                eprintln!("netgen: truncated parameter record");
-                std::process::exit(1);
-            }
+        let params = if let Some(p) = read_params(&mut tokens) {
+            p
+        } else {
+            eprintln!("netgen: truncated parameter record");
+            std::process::exit(1);
         };
         let inst = match generate(seed, params) {
             Ok(i) => i,

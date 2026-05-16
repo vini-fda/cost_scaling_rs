@@ -49,7 +49,7 @@ const PRICE_MAX: Price = MAX_64;
 const UPDT_FREQ: f64 = 0.4;
 const UPDT_FREQ_S: f64 = 30.0;
 const SCALE_DEFAULT: f64 = 12.0;
-/// PRICE_OUT_START may not be less than 1
+/// `PRICE_OUT_START` may not be less than 1
 const PRICE_OUT_START: u64 = 1;
 const CUT_OFF_POWER: f64 = 0.44;
 const CUT_OFF_COEF: f64 = 1.5;
@@ -105,7 +105,7 @@ struct Node {
     b_prev: *mut Node,
     /// Bucket number.
     rank: i64,
-    /// DFS visit color (White/Grey/Black) used in price_refine and compute_prices.
+    /// DFS visit color (White/Grey/Black) used in `price_refine` and `compute_prices`.
     inp: Color,
 }
 
@@ -351,7 +351,7 @@ pub struct McmfCs2 {
     buckets_base: *mut Bucket,
     /// Last bucket index.
     l_bucket: BucketIndex,
-    /// Number of l_bucket + 1.
+    /// Number of `l_bucket` + 1.
     linf: usize,
     time_for_price_in: i32,
 
@@ -365,7 +365,7 @@ pub struct McmfCs2 {
     mmc: Price,
     /// Scale factor.
     f_scale: f64,
-    /// Multiplier to produce cut_on and cut_off from n and epsilon.
+    /// Multiplier to produce `cut_on` and `cut_off` from n and epsilon.
     cut_off_factor: f64,
     /// The bound for returning suspended arcs.
     cut_on: f64,
@@ -518,6 +518,7 @@ impl TryFrom<parser::DimacsMin> for McmfCs2 {
 
 impl McmfCs2 {
     /// Create a new solver for a network with `num_nodes` nodes and `num_arcs` arcs.
+    #[must_use]
     pub fn new(num_nodes: usize, num_arcs: usize) -> Self {
         let mut solver = McmfCs2 {
             n: num_nodes,
@@ -1792,14 +1793,13 @@ impl McmfCs2 {
                         while self.flag_updt != UpdateFlag::Ok {
                             if self.n_ref == 1 {
                                 return Err(Cs2Error::Infeasible);
-                            } else {
-                                self.flag_updt = UpdateFlag::Ok;
-                                self.update_cut_off();
-                                self.n_bad_relabel += 1;
-                                pr_in_int = 0;
-                                self.price_in();
-                                self.price_update();
                             }
+                            self.flag_updt = UpdateFlag::Ok;
+                            self.update_cut_off();
+                            self.n_bad_relabel += 1;
+                            pr_in_int = 0;
+                            self.price_in();
+                            self.price_update();
                         }
                         self.n_rel = 0;
 
@@ -2370,7 +2370,7 @@ impl McmfCs2 {
 
     /// Prints the solution.
     ///
-    /// comp_duals: whether to compute the prices.
+    /// `comp_duals`: whether to compute the prices.
     fn print_solution(&self, comp_duals: bool) {
         if !self.print_ans {
             return;
@@ -2509,7 +2509,7 @@ impl McmfCs2 {
     /// 3. Reduces epsilon by the scale factor.
     /// 4. Attempts [`price_refine`](Self::price_refine) to skip full refine
     ///    iterations when prices alone can establish optimality at the new
-    ///    epsilon. Falls back to refine if price_refine detects a cycle.
+    ///    epsilon. Falls back to refine if `price_refine` detects a cycle.
     ///
     /// Terminates when `epsilon < 1`, at which point the flow is optimal.
     #[inline(never)]
@@ -2558,8 +2558,8 @@ impl McmfCs2 {
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, printing the solution.
     ///
     /// Args
-    /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    /// - comp_duals: Enable to compute prices
+    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
+    /// - `comp_duals`: Enable to compute prices
     pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing()?;
@@ -2633,11 +2633,11 @@ impl McmfCs2 {
     }
 
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, returning the solution
-    /// as a [McmfSolution] object.
+    /// as a [`McmfSolution`] object.
     ///
     /// Args
-    /// - check_solution: Check feasibility/optimality. Note that this adds high overhead.
-    /// - comp_duals: Enable to compute prices
+    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
+    /// - `comp_duals`: Enable to compute prices
     pub fn min_cost(
         mut self,
         check_solution: bool,
@@ -2742,14 +2742,15 @@ impl McmfSolution {
         })
     }
 
-    /// Iterate over node prices yielding (node_id, price).
-    /// Only meaningful if comp_duals was enabled.
+    /// Iterate over node prices yielding (`node_id`, price).
+    /// Only meaningful if `comp_duals` was enabled.
     pub fn prices(&self) -> impl Iterator<Item = (usize, Price)> {
         let s = &self.solver;
         (0..s.n).map(move |i| (n_node(i, s.node_min) as usize, s.nodes[i].price))
     }
 
     /// Returns statistics of the solution.
+    #[must_use]
     pub fn stats(&self) -> McmfStats {
         let s = &self.solver;
         McmfStats {

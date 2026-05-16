@@ -227,7 +227,7 @@ impl Builder {
                     chosen = remaining_arcs as i32;
                 }
                 let condition_lhs: u64 = self.nodes_left.wrapping_mul(non_sources.wrapping_sub(1));
-                let condition_rhs: u64 = remaining_arcs.wrapping_sub(chosen as i64 as u64);
+                let condition_rhs: u64 = remaining_arcs.wrapping_sub(i64::from(chosen) as u64);
                 if condition_lhs >= condition_rhs {
                     break chosen;
                 }
@@ -383,8 +383,8 @@ pub fn generate(seed: i64, params: NetgenParams) -> Result<NetgenInstance, Netge
             params.sinks / params.sources + 1
         } else {
             // i128 for safety on huge problems (bcjl overflow fix).
-            ((2 * sort_count as i128 * params.sinks as i128)
-                / (params.nodes - params.sources - params.sinks) as i128) as u64
+            ((2 * i128::from(sort_count) * i128::from(params.sinks))
+                / i128::from(params.nodes - params.sources - params.sinks)) as u64
         };
         sinks_per_source = sinks_per_source.clamp(2, params.sinks);
 

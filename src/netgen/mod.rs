@@ -45,7 +45,7 @@ pub use generator::{NetgenError, NetgenInstance, NetgenParams, ProblemKind, gene
 pub fn write_dimacs<W: Write>(inst: &NetgenInstance, w: &mut W, problem: i64) -> io::Result<()> {
     let p = &inst.params;
     writeln!(w, "c NETGEN flow network generator (C version)")?;
-    writeln!(w, "c  Problem {:2} input parameters", problem)?;
+    writeln!(w, "c  Problem {problem:2} input parameters")?;
     writeln!(w, "c  ---------------------------")?;
     writeln!(w, "c   Random seed:          {:10}", inst.seed)?;
     writeln!(w, "c   Number of nodes:      {:10}", p.nodes)?;
