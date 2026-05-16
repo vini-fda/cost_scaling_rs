@@ -913,9 +913,7 @@ impl McmfCs2 {
         // reorder arcs by source node
         for i in self.node_min..self.node_max {
             // SAFETY: nodes_base/arcs_base set in allocate_arrays.
-            let last = unsafe {
-                self.nodes[i + 1].first.offset_from(self.arcs_base) as usize
-            };
+            let last = unsafe { self.nodes[i + 1].first.offset_from(self.arcs_base) as usize };
             let mut arc_num = self.arc_first[i] as usize;
             while arc_num < last {
                 let mut tail_node_id = self.arc_tail[arc_num];
@@ -924,35 +922,28 @@ impl McmfCs2 {
 
                     // SAFETY: arcs_base set in allocate_arrays; arc_num and
                     // arc_new_num are valid arc indexes within sentinel_arc.
+                    // `arc_new_num != arc_num` is an algorithm invariant in
+                    // this branch: `arc_new_num = arc_first[tail_node_id]`
+                    // stays within tail_node_id's contiguous block, and
+                    // arc_num is within node i's (disjoint) block since
+                    // `tail_node_id != i`. So the `&mut`s passed to
+                    // `mem::swap` never alias.
                     unsafe {
                         let ab = self.arcs_base;
                         let p_new = ab.add(arc_new_num);
                         let p_old = ab.add(arc_num);
 
-                        // swap heads (pointers)
-                        let tmp_head = (*p_new).head;
-                        (*p_new).head = (*p_old).head;
-                        (*p_old).head = tmp_head;
+                        std::mem::swap(&mut (*p_new).head, &mut (*p_old).head);
+                        std::mem::swap(&mut (*p_new).res_capacity, &mut (*p_old).res_capacity);
+                        std::mem::swap(&mut (*p_new).cost, &mut (*p_old).cost);
 
-                        // swap rez_capacity
-                        let tmp_rez = (*p_new).res_capacity;
-                        (*p_new).res_capacity = (*p_old).res_capacity;
-                        (*p_old).res_capacity = tmp_rez;
-
-                        // swap cost
-                        let tmp_cost = (*p_new).cost;
-                        (*p_new).cost = (*p_old).cost;
-                        (*p_old).cost = tmp_cost;
-
-                        // swap sisters (pointers). If the two arcs being
-                        // swapped are each other's sisters, the sister
-                        // relationship is already preserved by the swap
-                        // above; otherwise the *other* arcs' sister fields
-                        // must be redirected to the new positions.
+                        // Sister fixup: if the two arcs are each other's
+                        // sisters, the swap above already preserved the
+                        // relationship; otherwise we need to swap sister
+                        // fields and redirect the *other* arcs' sister
+                        // pointers to the new positions.
                         if p_new != (*p_old).sister {
-                            let tmp_s = (*p_new).sister;
-                            (*p_new).sister = (*p_old).sister;
-                            (*p_old).sister = tmp_s;
+                            std::mem::swap(&mut (*p_new).sister, &mut (*p_old).sister);
 
                             let s1 = (*p_old).sister;
                             (*s1).sister = p_old;
@@ -986,9 +977,8 @@ impl McmfCs2 {
                     _cap_out += self.cap[ac];
                 }
                 if self.cap[ac] == 0 {
-                    let sister_idx = unsafe {
-                        self.arcs[ac].sister.offset_from(self.arcs_base) as usize
-                    };
+                    let sister_idx =
+                        unsafe { self.arcs[ac].sister.offset_from(self.arcs_base) as usize };
                     _cap_in += self.cap[sister_idx];
                 }
             }
@@ -1181,11 +1171,7 @@ impl McmfCs2 {
                             i_rank
                         } else {
                             let dr = rc / eps;
-                            if dr < linf_i {
-                                i_rank + dr + 1
-                            } else {
-                                linf_i
-                            }
+                            if dr < linf_i { i_rank + dr + 1 } else { linf_i }
                         };
                         if j_rank > j_new_rank {
                             (*j_ptr).rank = j_new_rank;
@@ -1851,11 +1837,7 @@ impl McmfCs2 {
                                         i_rank
                                     } else {
                                         let dr = rc / eps;
-                                        if dr < linf_i {
-                                            i_rank - (dr + 1)
-                                        } else {
-                                            0
-                                        }
+                                        if dr < linf_i { i_rank - (dr + 1) } else { 0 }
                                     };
                                     if j_rank < j_new_rank {
                                         if eps_optimal {
@@ -2053,11 +2035,7 @@ impl McmfCs2 {
                                         i_rank
                                     } else {
                                         let dr = rc;
-                                        if dr < linf_i {
-                                            i_rank - (dr + 1)
-                                        } else {
-                                            0
-                                        }
+                                        if dr < linf_i { i_rank - (dr + 1) } else { 0 }
                                     };
                                     if j_rank < j_new_rank && cycle_free {
                                         (*j_ptr).rank = j_new_rank;
@@ -2145,10 +2123,8 @@ impl McmfCs2 {
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
             // SAFETY: post-cs2_initialize, all .suspended pointers are valid.
-            let a_start =
-                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            let a_stop =
-                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
+            let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
                     let fa = self.cap[a] - self.arcs[a].res_capacity;
@@ -2157,8 +2133,7 @@ impl McmfCs2 {
                         break;
                     }
                     self.node_balance[i] -= fa;
-                    let head_idx =
-                        unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
+                    let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     self.node_balance[head_idx] += fa;
                 }
             }
@@ -2180,10 +2155,8 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
-            let a_start =
-                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            let a_stop =
-                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
+            let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.arcs[a].res_capacity > 0 {
                     let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
@@ -2211,14 +2184,11 @@ impl McmfCs2 {
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
-            let a_start =
-                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            let a_stop =
-                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
+            let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
-                    let head_idx =
-                        unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
+                    let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     println!(
                         "f {:7} {:7} {:10}",
                         ni,
@@ -2253,13 +2223,10 @@ impl McmfCs2 {
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
             println!("\nNode {ni}");
-            let a_start =
-                unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            let a_stop =
-                unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
+            let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
-                let head_idx =
-                    unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
+                let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                 println!(
                     " {{{}}} {} -> {}  cap: {}  cost: {}",
                     a,
@@ -2549,8 +2516,7 @@ impl McmfSolution {
                 if s.cap[a] > 0 {
                     let flow = s.cap[a] - s.arcs[a].res_capacity;
                     let tail = n_node(i, s.node_min) as usize;
-                    let head_idx =
-                        unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
+                    let head_idx = unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
                     let head = n_node(head_idx, s.node_min) as usize;
                     Some((tail, head, flow))
                 } else {
