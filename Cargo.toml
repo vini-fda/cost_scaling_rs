@@ -52,8 +52,6 @@ bare_urls = "warn"
 unwrap_used = "deny"
 undocumented_unsafe_blocks = "deny"
 missing_safety_doc = "deny"
-# Cherry-picked from clippy::pedantic — the parts that are real findings
-# rather than noise on numeric casts / hot-path inline(always) attributes.
 doc_markdown = "warn"
 redundant_closure_for_method_calls = "warn"
 manual_let_else = "warn"
