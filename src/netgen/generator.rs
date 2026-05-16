@@ -304,9 +304,9 @@ fn create_assignment(b: &mut Builder) -> Result<(), NetgenError> {
 ///
 /// Returns a [`NetgenInstance`] whose arcs, supplies, and parameter echo match
 /// the C reference binary byte-for-byte when emitted through
-/// [`NetgenInstance::write_dimacs`].
+/// [`write_dimacs`].
 ///
-/// [`NetgenInstance::write_dimacs`]: super::NetgenInstance::write_dimacs
+/// [`write_dimacs`]: super::write_dimacs
 pub fn generate(seed: i64, params: NetgenParams) -> Result<NetgenInstance, NetgenError> {
     validate(seed, &params)?;
 
