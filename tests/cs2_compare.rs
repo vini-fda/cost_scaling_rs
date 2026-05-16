@@ -24,12 +24,18 @@ fn cs2_binary() -> PathBuf {
 
     BUILD_CS2.call_once(|| {
         if !bin.exists() {
-            let status = Command::new("make")
+            let output = Command::new("make")
                 .current_dir(&cs2_dir)
                 .arg("release")
-                .status()
+                .output()
                 .expect("failed to run make for cs2");
-            assert!(status.success(), "cs2 compilation failed");
+            assert!(
+                output.status.success(),
+                "cs2 compilation failed (exit {}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
         }
     });
 
