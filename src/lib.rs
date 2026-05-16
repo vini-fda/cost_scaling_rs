@@ -100,7 +100,7 @@ struct Node {
     excess: Excess,
     /// Distance from a sink (node potential).
     price: Price,
-    /// Next node in push-queue (or [`McmfCs2::sentinel_node_ptr`] if out of queue).
+    /// Next node in push-queue (or `McmfCs2::sentinel_node` if out of queue).
     q_next: *mut Node,
     /// Next node in bucket-list.
     b_next: *mut Node,
