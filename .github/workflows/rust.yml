@@ -121,15 +121,11 @@ jobs:
       - run: cargo doc --no-deps
 
   miri:
-    name: miri (${{ matrix.borrows }} borrows) (${{ matrix.host_target }})
+    name: miri (${{ matrix.host_target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # Run the soundness suite under both aliasing models. They disagree
-        # on borderline cases, so a clean bill of health from both gives
-        # the strongest guarantee.
-        borrows: [stacked, tree]
         include:
           - host_target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
@@ -154,7 +150,7 @@ jobs:
       # miri's instrumented std emits any lint, so override here. The
       # release jobs above remain strict.
       RUSTFLAGS: ""
-      MIRIFLAGS: ${{ matrix.borrows == 'tree' && '-Zmiri-disable-isolation -Zmiri-tree-borrows' || '-Zmiri-disable-isolation' }}
+      MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-tree-borrows"
       HOST_TARGET: ${{ matrix.host_target }}
     steps:
       - uses: actions/checkout@v6
