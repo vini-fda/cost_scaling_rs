@@ -15,6 +15,8 @@
 #[doc(hidden)]
 pub mod goto;
 #[doc(hidden)]
+pub mod netgen;
+#[doc(hidden)]
 pub mod parser;
 
 pub use parser::ParseError;
