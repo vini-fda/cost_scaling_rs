@@ -1659,19 +1659,19 @@ impl McmfCs2 {
                             let df = (*a).res_capacity;
                             self.increase_flow(i_ptr, j_ptr, a, df);
 
-                            let ra = (*a).sister;
-                            let j2_ptr = (*a).head;
+                            let reverse_arc = (*a).sister;
 
                             (*i_ptr).first = (*i_ptr).first.sub(1);
                             let b_idx = (*i_ptr).first.offset_from(arcs_base) as usize;
                             let a_idx = a.offset_from(arcs_base) as usize;
                             self.exchange(a_idx, b_idx);
 
-                            if ra < (*j2_ptr).first {
-                                (*j2_ptr).first = (*j2_ptr).first.sub(1);
-                                let rb_idx = (*j2_ptr).first.offset_from(arcs_base) as usize;
-                                let ra_idx = ra.offset_from(arcs_base) as usize;
-                                self.exchange(ra_idx, rb_idx);
+                            if reverse_arc < (*j_ptr).first {
+                                (*j_ptr).first = (*j_ptr).first.sub(1);
+                                let reverse_first_idx =
+                                    (*j_ptr).first.offset_from(arcs_base) as usize;
+                                let reverse_arc_idx = reverse_arc.offset_from(arcs_base) as usize;
+                                self.exchange(reverse_arc_idx, reverse_first_idx);
                             }
 
                             n_in_bad += 1;
@@ -2560,6 +2560,11 @@ impl McmfCs2 {
     /// Args
     /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
     /// - `comp_duals`: Enable to compute prices
+    ///
+    /// # Errors
+    /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
+    /// circulation, or any other [`Cs2Error`] variant produced by the
+    /// preprocessing / cost-scaling phases.
     pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing()?;
@@ -2638,6 +2643,11 @@ impl McmfCs2 {
     /// Args
     /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
     /// - `comp_duals`: Enable to compute prices
+    ///
+    /// # Errors
+    /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
+    /// circulation, or any other [`Cs2Error`] variant produced by the
+    /// preprocessing / cost-scaling phases.
     pub fn min_cost(
         mut self,
         check_solution: bool,

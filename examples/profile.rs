@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--size" => {
                 i += 1;
-                problem_size = raw_args.get(i).ok_or("--size requires a value")?.clone();
+                problem_size.clone_from(raw_args.get(i).ok_or("--size requires a value")?);
                 i += 1;
             }
             other => {
@@ -115,14 +115,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_map(Result::ok)
         .map(|e| e.path())
         .find(|p| {
-            p.file_name()
-                .and_then(OsStr::to_str)
-                .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".min"))
+            p.extension().and_then(OsStr::to_str) == Some("min")
+                && p.file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|n| n.starts_with(&prefix))
         });
 
-    let problem = if let Some(p) = problem {
-        p
-    } else {
+    let Some(problem) = problem else {
         eprintln!("Error: No problem file found for size {problem_size}.");
         eprintln!("Available:");
         let mut available: Vec<PathBuf> = fs::read_dir(&data_dir)?

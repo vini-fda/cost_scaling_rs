@@ -109,12 +109,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     let mut problems: Vec<PathBuf> = fs::read_dir(DATA_DIR)?
-        .filter_map(std::result::Result::ok)
+        .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("goto_") && n.ends_with(".min"))
+            p.extension().and_then(|e| e.to_str()) == Some("min")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("goto_"))
         })
         .collect();
     problems.sort();

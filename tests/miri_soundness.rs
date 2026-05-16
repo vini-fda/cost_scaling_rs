@@ -84,18 +84,30 @@ fn solve(dimacs: &str) -> f64 {
     solve_with(dimacs, true, true)
 }
 
+/// Asserts an `f64` solver cost equals an integer-valued expected cost.
+/// Inputs are integers and the algorithm only divides by an integer scale,
+/// so optimal costs are exact integers — but clippy can't prove that, so
+/// we compare with a tiny tolerance instead of using `==`.
+#[track_caller]
+fn assert_cost(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "cost {actual} != expected {expected}",
+    );
+}
+
 #[test]
 fn sample_six_node() {
     let cost = solve(SAMPLE);
     // Known optimal cost for the sample input.
-    assert_eq!(cost, 70.0);
+    assert_cost(cost, 70.0);
 }
 
 #[test]
 fn triangle() {
     let cost = solve(TRIANGLE);
     // 2 units source→sink. Cheapest is via 1→2→3 at cost (1+1)*2 = 4.
-    assert_eq!(cost, 4.0);
+    assert_cost(cost, 4.0);
 }
 
 #[test]
@@ -116,7 +128,7 @@ fn lower_bounds() {
     // Forced flow: 3 units through 1->2 (lower) + 3 through 2->3 (lower),
     // plus 7 more units balancing 1's supply (10) to 3's demand (-10),
     // along the only path: cost = 10*(2+3) = 50.
-    assert_eq!(cost, 50.0);
+    assert_cost(cost, 50.0);
 }
 
 #[test]
@@ -150,8 +162,8 @@ fn programmatic_build() {
 #[test]
 fn repeated_solves() {
     for _ in 0..3 {
-        assert_eq!(solve(SAMPLE), 70.0);
-        assert_eq!(solve(TRIANGLE), 4.0);
+        assert_cost(solve(SAMPLE), 70.0);
+        assert_cost(solve(TRIANGLE), 4.0);
     }
 }
 

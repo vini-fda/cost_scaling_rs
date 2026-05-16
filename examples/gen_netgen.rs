@@ -36,23 +36,19 @@ fn main() {
     let mut out = BufWriter::new(stdout.lock());
 
     loop {
-        let seed = match next_i64(&mut tokens) {
-            Some(v) => v,
-            None => return,
+        let Some(seed) = next_i64(&mut tokens) else {
+            return;
         };
         if seed <= 0 {
             return;
         }
-        let problem = match next_i64(&mut tokens) {
-            Some(v) => v,
-            None => return,
+        let Some(problem) = next_i64(&mut tokens) else {
+            return;
         };
         if problem <= 0 {
             return;
         }
-        let params = if let Some(p) = read_params(&mut tokens) {
-            p
-        } else {
+        let Some(params) = read_params(&mut tokens) else {
             eprintln!("netgen: truncated parameter record");
             std::process::exit(1);
         };
