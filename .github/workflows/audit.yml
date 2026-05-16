@@ -40,19 +40,26 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
 
       - name: Install cargo-audit
         if: steps.cache-cargo-audit.outputs.cache-hit != 'true'
         run: cargo install cargo-audit --version ${{ env.CARGO_AUDIT_VERSION }} --locked
 
       # Cache the advisory DB too, so we don't re-clone it from GitHub on
-      # every run. cargo-audit will auto-update it if older than ~24h.
+      # every run. cargo-audit will auto-update it if older than ~24h, so we
+      # rotate the key daily: same day = real cache hit (no re-save), new day
+      # = miss + prefix-match restore + one save. This avoids creating a new
+      # cache entry on every workflow run.
+      - name: Get date (UTC, daily)
+        id: advisory-db-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Cache RustSec advisory DB
         uses: actions/cache@v5
         with:
           path: ~/.cargo/advisory-db
-          key: rustsec-advisory-db-${{ github.run_id }}
+          key: rustsec-advisory-db-${{ steps.advisory-db-date.outputs.date }}
           restore-keys: |
             rustsec-advisory-db-
 
