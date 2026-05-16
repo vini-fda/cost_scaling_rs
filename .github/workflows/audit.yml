@@ -21,7 +21,7 @@ on:
 env:
   # Bump this to force a re-install of cargo-audit (e.g. for a security fix
   # in the tool itself). The cache key includes this value.
-  CARGO_AUDIT_VERSION: "0.21.2"
+  CARGO_AUDIT_VERSION: "0.22.1"
 
 jobs:
   audit:
