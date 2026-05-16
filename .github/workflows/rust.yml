@@ -147,6 +147,22 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  semver:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    # On a push to master we'd be comparing master to itself; only run
+    # on PRs targeting master.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cargo-semver-checks needs the baseline commit to be available
+          # locally; fetch full history rather than the default shallow clone.
+          fetch-depth: 0
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: origin/master
+
   miri:
     name: miri (${{ matrix.host_target }})
     runs-on: ${{ matrix.os }}
