@@ -82,9 +82,6 @@ jobs:
           done
           # Install needed packages
           sudo apt install $(echo "libatomic1: zlib1g-dev:" | sed 's/:/:${{ matrix.multiarch }}/g')
-      - name: install qemu
-        if: ${{ matrix.qemu }}
-        run: sudo apt install qemu-user qemu-user-binfmt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: install C toolchain for reference binary (Linux)
@@ -167,9 +164,6 @@ jobs:
           done
           # Install needed packages
           sudo apt install $(echo "libatomic1: zlib1g-dev:" | sed 's/:/:${{ matrix.multiarch }}/g')
-      - name: install qemu
-        if: ${{ matrix.qemu }}
-        run: sudo apt install qemu-user qemu-user-binfmt
       - name: Install Miri
         run: |
           rustup toolchain install nightly --component miri
