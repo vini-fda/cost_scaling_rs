@@ -24,8 +24,8 @@ a <tail> <head> <lower_bound> <upper_bound> <cost>
 ```rust
 use cost_scaling_rs::McmfCs2;
 
-let solver = McmfCs2::from_dimacs_file("problem.min").unwrap();
-let solution = solver.min_cost(false, false).unwrap();
+let solver = McmfCs2::from_dimacs_file("problem.min")?;
+let solution = solver.min_cost(false, false)?;
 println!("Optimal cost: {}", solution.objective_cost);
 ```
 
@@ -37,15 +37,15 @@ use cost_scaling_rs::McmfCs2;
 let mut solver = McmfCs2::new(6, 8); // 6 nodes, 8 arcs
 
 // Set supply (+) and demand (-) BEFORE adding arcs.
-solver.set_supply_demand_of_node(1, 10);  // source: +10
-solver.set_supply_demand_of_node(6, -10); // sink: -10
+solver.set_supply_demand_of_node(1, 10)?;  // source: +10
+solver.set_supply_demand_of_node(6, -10)?; // sink: -10
 
 // Add arcs: (tail, head, lower_bound, upper_bound, cost)
-solver.set_arc(1, 2, 0, 4, 1);
-solver.set_arc(1, 3, 0, 8, 5);
+solver.set_arc(1, 2, 0, 4, 1)?;
+solver.set_arc(1, 3, 0, 8, 5)?;
 // ... more arcs ...
 
-let solution = solver.min_cost(false, false).unwrap();
+let solution = solver.min_cost(false, false)?;
 println!("Optimal cost: {}", solution.objective_cost);
 
 for (tail, head, flow) in solution.flows() {

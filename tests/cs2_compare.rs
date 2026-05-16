@@ -674,10 +674,12 @@ a 2 3 0 10 100000
 #[test]
 fn edge_infeasible_insufficient_capacity() {
     let mut solver = McmfCs2::new(3, 2);
-    solver.set_arc(1, 2, 0, 5, 1);
-    solver.set_arc(2, 3, 0, 5, 1);
-    solver.set_supply_demand_of_node(1, 10);
-    solver.set_supply_demand_of_node(3, -10);
+    solver.set_arc(1, 2, 0, 5, 1).expect("set_arc");
+    solver.set_arc(2, 3, 0, 5, 1).expect("set_arc");
+    solver.set_supply_demand_of_node(1, 10).expect("set_supply");
+    solver
+        .set_supply_demand_of_node(3, -10)
+        .expect("set_supply");
     assert!(solver.min_cost(false, false).is_err());
 }
 
@@ -685,10 +687,10 @@ fn edge_infeasible_insufficient_capacity() {
 #[test]
 fn edge_infeasible_disconnected() {
     let mut solver = McmfCs2::new(4, 2);
-    solver.set_arc(1, 2, 0, 10, 1);
-    solver.set_arc(3, 4, 0, 10, 1);
-    solver.set_supply_demand_of_node(1, 5);
-    solver.set_supply_demand_of_node(4, -5);
+    solver.set_arc(1, 2, 0, 10, 1).expect("set_arc");
+    solver.set_arc(3, 4, 0, 10, 1).expect("set_arc");
+    solver.set_supply_demand_of_node(1, 5).expect("set_supply");
+    solver.set_supply_demand_of_node(4, -5).expect("set_supply");
     assert!(solver.min_cost(false, false).is_err());
 }
 

@@ -150,13 +150,13 @@ fn cycle_network() {
 #[test]
 fn programmatic_build() {
     let mut s = McmfCs2::new(4, 5);
-    s.set_supply_demand_of_node(1, 4);
-    s.set_supply_demand_of_node(4, -4);
-    s.set_arc(1, 2, 0, 4, 2);
-    s.set_arc(1, 3, 0, 2, 2);
-    s.set_arc(2, 3, 0, 2, 1);
-    s.set_arc(2, 4, 0, 3, 3);
-    s.set_arc(3, 4, 0, 5, 1);
+    s.set_supply_demand_of_node(1, 4).expect("set_supply");
+    s.set_supply_demand_of_node(4, -4).expect("set_supply");
+    s.set_arc(1, 2, 0, 4, 2).expect("set_arc");
+    s.set_arc(1, 3, 0, 2, 2).expect("set_arc");
+    s.set_arc(2, 3, 0, 2, 1).expect("set_arc");
+    s.set_arc(2, 4, 0, 3, 3).expect("set_arc");
+    s.set_arc(3, 4, 0, 5, 1).expect("set_arc");
     let sol = s.min_cost(true, true).expect("solve");
     assert!(sol.objective_cost > 0.0);
     let _ = sol.flows().count();

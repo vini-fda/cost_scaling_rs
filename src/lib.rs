@@ -4,6 +4,18 @@
 //! translated from the original C implementation.
 
 #![warn(missing_docs)]
+// Forbid the panic-emitting macros in the library crate. Build-time and
+// solver-time errors are surfaced through Result<_, Cs2Error> instead.
+// `#[cfg(test)]` modules and doc-tests are exempted so they can still
+// `.expect()` / `.unwrap()` for terseness; integration tests in `tests/`
+// and the `cost-scaling-rs` binary are separate crates and unaffected.
+#![cfg_attr(not(test), deny(clippy::panic))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::unreachable))]
+#![cfg_attr(not(test), deny(clippy::todo))]
+#![cfg_attr(not(test), deny(clippy::unimplemented))]
+#![cfg_attr(not(test), deny(clippy::panic_in_result_fn))]
 
 #[doc(hidden)]
 pub mod goto;
@@ -134,13 +146,124 @@ enum UpdateFlag {
     Failed,
 }
 
-/// Fatal error condition that terminates the CS2 solver.
-#[derive(Clone, Copy, Debug)]
+/// Fatal error condition that terminates the CS2 solver, or rejects an
+/// invalid build-time input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cs2Error {
     /// The problem is infeasible (unbalanced or unreachable nodes).
     Infeasible,
     /// Price values overflowed numerical limits.
     PriceOverflow,
+    /// A supplied node id is outside the `1..=n` range fixed by
+    /// [`McmfCs2::new`].
+    NodeIdOutOfBounds {
+        /// The offending node id.
+        id: usize,
+        /// The maximum valid node id (= `n`, the constructor's `num_nodes`).
+        max: usize,
+    },
+    /// An arc references a node id outside the `1..=n` range.
+    ArcOutOfBounds {
+        /// Tail node id supplied to [`McmfCs2::set_arc`].
+        tail: usize,
+        /// Head node id supplied to [`McmfCs2::set_arc`].
+        head: usize,
+        /// The maximum valid node id (= `n`).
+        max: usize,
+    },
+    /// An arc's lower/upper capacity bounds are inconsistent (e.g. negative
+    /// lower bound or `low > up`).
+    InvalidCapacityBounds {
+        /// Lower bound that was rejected.
+        low: i64,
+        /// Upper bound that was rejected.
+        up: i64,
+    },
+    /// Total supply does not equal total demand (sum of positive node
+    /// excesses minus sum of negative excesses is non-zero).
+    Unbalanced {
+        /// Total supply (sum of positive node excesses).
+        supply: Excess,
+        /// Total demand (negated sum of negative node excesses).
+        demand: Excess,
+    },
+    /// Node ids must start at 0 or 1; pre-processing found a smaller
+    /// minimum that the solver cannot internally remap.
+    NodeIdsMustStartAtZeroOrOne {
+        /// The minimum node id observed.
+        min: usize,
+    },
+}
+
+impl std::fmt::Display for Cs2Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Cs2Error::Infeasible => write!(f, "problem is infeasible"),
+            Cs2Error::PriceOverflow => write!(f, "price values overflowed"),
+            Cs2Error::NodeIdOutOfBounds { id, max } => {
+                write!(f, "node id {id} out of bounds (max {max})")
+            }
+            Cs2Error::ArcOutOfBounds { tail, head, max } => write!(
+                f,
+                "arc {tail}->{head} has at least one endpoint out of bounds (max {max})"
+            ),
+            Cs2Error::InvalidCapacityBounds { low, up } => write!(
+                f,
+                "invalid capacity bounds: low={low}, up={up} (require 0 <= low <= up)"
+            ),
+            Cs2Error::Unbalanced { supply, demand } => {
+                write!(f, "unbalanced problem: supply {supply} != demand {demand}")
+            }
+            Cs2Error::NodeIdsMustStartAtZeroOrOne { min } => write!(
+                f,
+                "node ids must start at 0 or 1; smallest observed id is {min}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Cs2Error {}
+
+/// Error returned by [`McmfCs2::from_dimacs`] / [`McmfCs2::from_dimacs_file`]:
+/// either the input could not be parsed, or the parsed problem failed the
+/// build-time checks in [`McmfCs2::set_arc`] / [`McmfCs2::set_supply_demand_of_node`].
+#[derive(Debug)]
+pub enum DimacsLoadError {
+    /// The DIMACS parser rejected the input.
+    Parse(ParseError),
+    /// The parsed problem did not satisfy the solver's build-time invariants
+    /// (e.g. node ids out of range, invalid capacity bounds).
+    Build(Cs2Error),
+}
+
+impl std::fmt::Display for DimacsLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DimacsLoadError::Parse(e) => write!(f, "parse error: {e}"),
+            DimacsLoadError::Build(e) => write!(f, "build error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for DimacsLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DimacsLoadError::Parse(e) => Some(e),
+            DimacsLoadError::Build(e) => Some(e),
+        }
+    }
+}
+
+impl From<ParseError> for DimacsLoadError {
+    fn from(e: ParseError) -> Self {
+        DimacsLoadError::Parse(e)
+    }
+}
+
+impl From<Cs2Error> for DimacsLoadError {
+    fn from(e: Cs2Error) -> Self {
+        DimacsLoadError::Build(e)
+    }
 }
 
 /// CS2 min-cost max-flow solver.
@@ -157,6 +280,7 @@ pub enum Cs2Error {
 /// ```
 /// use cost_scaling_rs::McmfCs2;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let input = "p min 4 5\n\
 ///              n 1 4\n\
 ///              n 4 -4\n\
@@ -165,9 +289,10 @@ pub enum Cs2Error {
 ///              a 2 3 0 2 1\n\
 ///              a 2 4 0 3 3\n\
 ///              a 3 4 0 5 1\n";
-/// let solver = McmfCs2::from_dimacs(input).unwrap();
-/// let solution = solver.min_cost(false, false).unwrap();
+/// let solver = McmfCs2::from_dimacs(input)?;
+/// let solution = solver.min_cost(false, false)?;
 /// assert!(solution.objective_cost > 0.0);
+/// # Ok(()) }
 /// ```
 ///
 /// **Programmatically:**
@@ -175,26 +300,28 @@ pub enum Cs2Error {
 /// ```
 /// use cost_scaling_rs::McmfCs2;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut solver = McmfCs2::new(4, 5);
 ///
 /// // Set supply (+) and demand (-) BEFORE adding arcs.
-/// solver.set_supply_demand_of_node(1, 4);   // source
-/// solver.set_supply_demand_of_node(4, -4);  // sink
+/// solver.set_supply_demand_of_node(1, 4)?;   // source
+/// solver.set_supply_demand_of_node(4, -4)?;  // sink
 ///
 /// // Add arcs: (tail, head, lower_bound, upper_bound, cost)
-/// solver.set_arc(1, 2, 0, 4, 2);
-/// solver.set_arc(1, 3, 0, 2, 2);
-/// solver.set_arc(2, 3, 0, 2, 1);
-/// solver.set_arc(2, 4, 0, 3, 3);
-/// solver.set_arc(3, 4, 0, 5, 1);
+/// solver.set_arc(1, 2, 0, 4, 2)?;
+/// solver.set_arc(1, 3, 0, 2, 2)?;
+/// solver.set_arc(2, 3, 0, 2, 1)?;
+/// solver.set_arc(2, 4, 0, 3, 3)?;
+/// solver.set_arc(3, 4, 0, 5, 1)?;
 ///
-/// let solution = solver.min_cost(false, false).unwrap();
+/// let solution = solver.min_cost(false, false)?;
 ///
 /// for (tail, head, flow) in solution.flows() {
 ///     if flow > 0 {
 ///         println!("  {tail} -> {head}: {flow}");
 ///     }
 /// }
+/// # Ok(()) }
 /// ```
 pub struct McmfCs2 {
     /// Number of nodes.
@@ -364,14 +491,16 @@ impl Default for Bucket {
     }
 }
 
-impl From<parser::DimacsMin> for McmfCs2 {
-    fn from(problem: parser::DimacsMin) -> Self {
+impl TryFrom<parser::DimacsMin> for McmfCs2 {
+    type Error = Cs2Error;
+
+    fn try_from(problem: parser::DimacsMin) -> Result<Self, Self::Error> {
         let mut solver = McmfCs2::new(problem.nodes as usize, problem.arcs_count as usize);
         // Node supply/demand must be set before arcs, because set_arc adjusts
         // excess for nonzero lower bounds (excess -= low for tail, excess += low
         // for head). Setting nodes after arcs would overwrite those adjustments.
         for node in &problem.node_descs {
-            solver.set_supply_demand_of_node(node.id as usize, node.supply);
+            solver.set_supply_demand_of_node(node.id as usize, node.supply)?;
         }
         for arc in &problem.arcs {
             solver.set_arc(
@@ -380,9 +509,9 @@ impl From<parser::DimacsMin> for McmfCs2 {
                 arc.min_cap,
                 arc.max_cap,
                 arc.cost,
-            );
+            )?;
         }
-        solver
+        Ok(solver)
     }
 }
 
@@ -473,10 +602,11 @@ impl McmfCs2 {
     ///
     /// # Errors
     ///
-    /// Returns a [`parser::ParseError`] if the input is malformed.
-    pub fn from_dimacs(input: &str) -> Result<Self, ParseError> {
+    /// Returns a [`DimacsLoadError`] if the input is malformed (parse error)
+    /// or fails the solver's build-time invariants ([`Cs2Error`]).
+    pub fn from_dimacs(input: &str) -> Result<Self, DimacsLoadError> {
         let problem = parser::parse(input)?;
-        Ok(Self::from(problem))
+        Ok(Self::try_from(problem)?)
     }
 
     /// Read a DIMACS `.min` file from disk and construct a solver.
@@ -795,6 +925,13 @@ impl McmfCs2 {
     }
 
     /// Add a directed arc from `tail_node_id` to `head_node_id` with the given bounds and cost.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Cs2Error::ArcOutOfBounds`] if either endpoint is outside
+    /// `1..=n`, or [`Cs2Error::InvalidCapacityBounds`] if `low_bound < 0`
+    /// or `low_bound > up_bound` (after the negative-`up_bound` sentinel
+    /// is rewritten to `MAX_32`).
     pub fn set_arc(
         &mut self,
         tail_node_id: usize,
@@ -802,19 +939,24 @@ impl McmfCs2 {
         low_bound: i64,
         mut up_bound: i64,
         cost: Price,
-    ) {
-        assert!(
-            tail_node_id <= self.n && head_node_id <= self.n,
-            "Arc with head or tail out of bounds"
-        );
+    ) -> Result<(), Cs2Error> {
+        if tail_node_id > self.n || head_node_id > self.n {
+            return Err(Cs2Error::ArcOutOfBounds {
+                tail: tail_node_id,
+                head: head_node_id,
+                max: self.n,
+            });
+        }
         if up_bound < 0 {
             up_bound = MAX_32;
             println!("Warning: Infinite capacity replaced by BIGGEST_FLOW");
         }
-        assert!(
-            low_bound >= 0 && low_bound <= up_bound,
-            "Wrong capacity bounds"
-        );
+        if low_bound < 0 || low_bound > up_bound {
+            return Err(Cs2Error::InvalidCapacityBounds {
+                low: low_bound,
+                up: up_bound,
+            });
+        }
 
         self.arc_first[tail_node_id + 1] += 1;
         self.arc_first[head_node_id + 1] += 1;
@@ -868,11 +1010,19 @@ impl McmfCs2 {
 
         self.arc_current += 2;
         self.pos_current += 2;
+        Ok(())
     }
 
     /// Set the supply (positive) or demand (negative) of a node. Must be called before [`set_arc`](Self::set_arc).
-    pub fn set_supply_demand_of_node(&mut self, id: usize, excess: Excess) {
-        assert!(id <= self.n, "Node id out of bounds");
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Cs2Error::NodeIdOutOfBounds`] if `id` exceeds the network's
+    /// node count (the `num_nodes` passed to [`Self::new`]).
+    pub fn set_supply_demand_of_node(&mut self, id: usize, excess: Excess) -> Result<(), Cs2Error> {
+        if id > self.n {
+            return Err(Cs2Error::NodeIdOutOfBounds { id, max: self.n });
+        }
         self.nodes[id].excess = excess;
         if excess > 0 {
             self.total_p += excess;
@@ -880,6 +1030,7 @@ impl McmfCs2 {
         if excess < 0 {
             self.total_n -= excess;
         }
+        Ok(())
     }
 
     /// Reorders arcs so each node's outgoing arcs are contiguous, then shifts
@@ -892,11 +1043,21 @@ impl McmfCs2 {
     ///
     /// Must be called exactly once, after all arcs have been added via
     /// [`set_arc`](Self::set_arc) and before [`cs2_initialize`](Self::cs2_initialize).
-    fn pre_processing(&mut self) {
-        assert!(
-            (self.total_p - self.total_n).abs() == 0,
-            "Unbalanced problem"
-        );
+    ///
+    /// # Errors
+    ///
+    /// - [`Cs2Error::Unbalanced`] if total supply != total demand.
+    /// - [`Cs2Error::NodeIdsMustStartAtZeroOrOne`] if the smallest node id
+    ///   seen by [`set_arc`](Self::set_arc) exceeds 1 (the internal
+    ///   zero-based remap shifts by `node_min`, which only works for
+    ///   `node_min <= 1`).
+    fn pre_processing(&mut self) -> Result<(), Cs2Error> {
+        if (self.total_p - self.total_n).abs() != 0 {
+            return Err(Cs2Error::Unbalanced {
+                supply: self.total_p,
+                demand: self.total_n,
+            });
+        }
 
         // first arc from the first node.
         // SAFETY: arcs_base / nodes_base set in allocate_arrays.
@@ -984,7 +1145,9 @@ impl McmfCs2 {
             }
         }
 
-        assert!(self.node_min <= 1, "Node ids must start from 0 or 1");
+        if self.node_min > 1 {
+            return Err(Cs2Error::NodeIdsMustStartAtZeroOrOne { min: self.node_min });
+        }
 
         // adjustments: shift node base.
         // Vec::drain(0..node_min) shifts the remaining elements forward
@@ -1011,6 +1174,7 @@ impl McmfCs2 {
         // free internal arrays
         self.arc_first.clear();
         self.arc_tail.clear();
+        Ok(())
     }
 
     /// Prepares the solver state for the cost-scaling iterations.
@@ -2255,7 +2419,9 @@ impl McmfCs2 {
                     let arc = self.arcs_base.add(a);
                     if (*arc).cost == 1 {
                         let sister = (*arc).sister;
-                        assert!((*sister).cost == -1);
+                        // Invariant from cs2_initialize: when an arc's cost
+                        // is rewritten to 1, its sister's is set to -1.
+                        debug_assert_eq!((*sister).cost, -1);
                         (*arc).cost = 0;
                         (*sister).cost = 0;
                     }
@@ -2350,7 +2516,7 @@ impl McmfCs2 {
     /// - comp_duals: Enable to compute prices
     pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
         // ordering
-        self.pre_processing();
+        self.pre_processing()?;
 
         // check solution setup
         if check_solution {
@@ -2432,7 +2598,7 @@ impl McmfCs2 {
         comp_duals: bool,
     ) -> Result<McmfSolution, Cs2Error> {
         // ordering
-        self.pre_processing();
+        self.pre_processing()?;
 
         // check solution setup
         if check_solution {
