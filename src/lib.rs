@@ -1148,11 +1148,11 @@ impl McmfCs2 {
         for ndp in self.node_min..=self.node_max {
             let mut _cap_in: Excess = self.nodes[ndp].excess;
             let mut _cap_out: Excess = -self.nodes[ndp].excess;
-            // SAFETY: post-allocate_arrays, every `.first` pointer is an
-            // offset into the live `arcs_base` arena.
+            // SAFETY: allocate_arrays stored `node.first` as a pointer into
+            // the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[ndp].first.offset_from(self.arcs_base) as usize };
-            // SAFETY: same as above; `ndp + 1` is in-bounds because the node
-            // arena has a trailing sentinel.
+            // SAFETY: same allocation invariant as `a_start`; the trailing
+            // sentinel at `self.nodes[node_max + 1]` keeps `ndp + 1` in-bounds.
             let a_end = unsafe { self.nodes[ndp + 1].first.offset_from(self.arcs_base) as usize };
             for ac in a_start..a_end {
                 if self.cap[ac] > 0 {
@@ -2309,11 +2309,11 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
-            // SAFETY: post-cs2_initialize, every `.suspended` pointer is an
-            // offset into the live `arcs_base` arena.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            // SAFETY: same as above; `i + 1` is in-bounds because the node
-            // arena has a trailing sentinel.
+            // SAFETY: same allocation invariant as `a_start`; the trailing
+            // sentinel at `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
@@ -2323,8 +2323,8 @@ impl McmfCs2 {
                         break;
                     }
                     self.node_balance[i] -= fa;
-                    // SAFETY: every `.head` pointer is an offset into the
-                    // live `nodes_base` arena.
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     self.node_balance[head_idx] += fa;
                 }
@@ -2347,15 +2347,16 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
-            // SAFETY: post-cs2_initialize, `.suspended` pointers are offsets
-            // into `arcs_base` and `.head` pointers are offsets into
-            // `nodes_base`; trailing sentinel makes `i + 1` in-bounds.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            // SAFETY: see above.
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.arcs[a].res_capacity > 0 {
-                    // SAFETY: see above.
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                     if rc < 0 {
@@ -2381,15 +2382,16 @@ impl McmfCs2 {
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
-            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
-            // are offsets into the corresponding live arenas; trailing
-            // sentinel makes `i + 1` in-bounds.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            // SAFETY: see above.
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
-                    // SAFETY: see above.
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     println!(
                         "f {:7} {:7} {:10}",
@@ -2425,14 +2427,15 @@ impl McmfCs2 {
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
             println!("\nNode {ni}");
-            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
-            // are offsets into the corresponding live arenas; trailing
-            // sentinel makes `i + 1` in-bounds.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
-            // SAFETY: see above.
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `self.nodes[self.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
-                // SAFETY: see above.
+                // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                // into the same allocation as `nodes_base`.
                 let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                 println!(
                     " {{{}}} {} -> {}  cap: {}  cost: {}",
@@ -2717,17 +2720,18 @@ impl McmfSolution {
         let arcs_base = s.arcs_base;
         let nodes_base = s.nodes_base;
         (0..s.n).flat_map(move |i| {
-            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
-            // are offsets into the corresponding live arenas; trailing
-            // sentinel makes `i + 1` in-bounds.
+            // SAFETY: cs2_initialize stored `node.suspended` as a pointer
+            // into the same allocation as `arcs_base`.
             let a_start = unsafe { s.nodes[i].suspended.offset_from(arcs_base) as usize };
-            // SAFETY: see above.
+            // SAFETY: same as `a_start`; the trailing sentinel at
+            // `s.nodes[s.n]` keeps `i + 1` in-bounds.
             let a_stop = unsafe { s.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             (a_start..a_stop).filter_map(move |a| {
                 if s.cap[a] > 0 {
                     let flow = s.cap[a] - s.arcs[a].res_capacity;
                     let tail = n_node(i, s.node_min) as usize;
-                    // SAFETY: see above.
+                    // SAFETY: cs2_initialize stored `arc.head` as a pointer
+                    // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
                     let head = n_node(head_idx, s.node_min) as usize;
                     Some((tail, head, flow))
