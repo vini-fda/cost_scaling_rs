@@ -1081,8 +1081,9 @@ impl McmfCs2 {
                 while tail_node_id != i {
                     let arc_new_num = self.arc_first[tail_node_id] as usize;
 
-                    // SAFETY: arcs_base set in allocate_arrays; arc_num and
-                    // arc_new_num are valid arc indexes within sentinel_arc.
+                    // SAFETY: arcs_base is set in allocate_arrays, and
+                    // arc_num / arc_new_num are valid indexes into the
+                    // allocated arc storage tracked by arcs_base here.
                     // `arc_new_num != arc_num` is an algorithm invariant in
                     // this branch: `arc_new_num = arc_first[tail_node_id]`
                     // stays within tail_node_id's contiguous block, and
