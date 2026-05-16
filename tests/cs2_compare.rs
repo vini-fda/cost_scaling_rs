@@ -20,16 +20,24 @@ fn project_root() -> PathBuf {
 /// Returns the path to the C cs2 binary, building it if necessary.
 fn cs2_binary() -> PathBuf {
     let cs2_dir = project_root().join("cs2");
-    let bin = cs2_dir.join("cs2");
+    // The C makefile emits `cs2.exe` on Windows and `cs2` everywhere else;
+    // `EXE_SUFFIX` gives us ".exe" or "" accordingly.
+    let bin = cs2_dir.join(format!("cs2{}", std::env::consts::EXE_SUFFIX));
 
     BUILD_CS2.call_once(|| {
         if !bin.exists() {
-            let status = Command::new("make")
+            let output = Command::new("make")
                 .current_dir(&cs2_dir)
                 .arg("release")
-                .status()
+                .output()
                 .expect("failed to run make for cs2");
-            assert!(status.success(), "cs2 compilation failed");
+            assert!(
+                output.status.success(),
+                "cs2 compilation failed (exit {}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
         }
     });
 
@@ -674,10 +682,12 @@ a 2 3 0 10 100000
 #[test]
 fn edge_infeasible_insufficient_capacity() {
     let mut solver = McmfCs2::new(3, 2);
-    solver.set_arc(1, 2, 0, 5, 1);
-    solver.set_arc(2, 3, 0, 5, 1);
-    solver.set_supply_demand_of_node(1, 10);
-    solver.set_supply_demand_of_node(3, -10);
+    solver.set_arc(1, 2, 0, 5, 1).expect("set_arc");
+    solver.set_arc(2, 3, 0, 5, 1).expect("set_arc");
+    solver.set_supply_demand_of_node(1, 10).expect("set_supply");
+    solver
+        .set_supply_demand_of_node(3, -10)
+        .expect("set_supply");
     assert!(solver.min_cost(false, false).is_err());
 }
 
@@ -685,10 +695,10 @@ fn edge_infeasible_insufficient_capacity() {
 #[test]
 fn edge_infeasible_disconnected() {
     let mut solver = McmfCs2::new(4, 2);
-    solver.set_arc(1, 2, 0, 10, 1);
-    solver.set_arc(3, 4, 0, 10, 1);
-    solver.set_supply_demand_of_node(1, 5);
-    solver.set_supply_demand_of_node(4, -5);
+    solver.set_arc(1, 2, 0, 10, 1).expect("set_arc");
+    solver.set_arc(3, 4, 0, 10, 1).expect("set_arc");
+    solver.set_supply_demand_of_node(1, 5).expect("set_supply");
+    solver.set_supply_demand_of_node(4, -5).expect("set_supply");
     assert!(solver.min_cost(false, false).is_err());
 }
 

@@ -21,7 +21,7 @@
 /* function 'timer()' for measuring processor time */
 
 #ifdef WINDOWS_TIMER
-#include "winTimer.c"
+#include "wintimer.c"
 #else
 #include "timer.c"
 #endif
