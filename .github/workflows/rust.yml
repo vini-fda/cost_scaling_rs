@@ -122,7 +122,7 @@ jobs:
     name: msrv
     runs-on: ubuntu-latest
     # Uses the official cargo-msrv image (recommended in
-    # https://gribnau.dev/cargo-msrv/usage/use-in-ci-pipeline.html).
+    # https://gribnau.dev/cargo-msrv/ci/gitlab.html).
     # GitHub Actions overrides the image's `cargo msrv` entrypoint via its
     # own runtime, so explicit steps below run normally.
     container:
