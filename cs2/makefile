@@ -13,22 +13,28 @@ CCOMP ?= clang
 #   * On Windows, clang produces cs2.exe and the math functions live in the
 #     C runtime (no -lm). We also skip -flto because clang on Windows defaults
 #     to link.exe, which can't consume LLVM bitcode (would need -fuse-ld=lld).
-#   * Elsewhere we keep cs2 (no extension), -lm, and -flto.
+#     -DWINDOWS_TIMER selects wintimer.c (clock()) over timer.c (which pulls in
+#     POSIX-only <sys/time.h>, <sys/resource.h>, <unistd.h>).
+#   * Elsewhere we keep cs2 (no extension), -lm, -flto, and POSIX timer.c.
 ifeq ($(OS),Windows_NT)
   BIN = cs2.exe
   LIBS =
   LTO_FLAG =
+  PLATFORM_DEFS = -DWINDOWS_TIMER
+  TIMER_SRC = wintimer.c
 else
   BIN = cs2
   LIBS = -lm
   LTO_FLAG = -flto
+  PLATFORM_DEFS =
+  TIMER_SRC = timer.c
 endif
 
 SRC = cs2.c
-HEADERS = types_cs2.h parser_cs2.c timer.c
+HEADERS = types_cs2.h parser_cs2.c $(TIMER_SRC)
 
 # Program feature flags (toggle here)
-COMPILER_DEFS = -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART
+COMPILER_DEFS = -DPRINT_ANS -DCOMP_DUALS -DCOST_RESTART $(PLATFORM_DEFS)
 
 # Native-CPU tuning. `-march=native` is x86-centric; on AArch64 clang accepts
 # `-mcpu=native` instead. Detect the host arch at make time. Override with
