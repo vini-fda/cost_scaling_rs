@@ -631,6 +631,8 @@ impl McmfCs2 {
     /// Caller must pass valid node/arc pointers (i.e., into the live arenas).
     #[inline(always)]
     unsafe fn increase_flow(&mut self, i: *mut Node, j: *mut Node, a: *mut Arc, df: i64) {
+        // SAFETY: upheld by this function's safety contract: `i`, `j`, `a`,
+        // and `(*a).sister` all point into the live node/arc arenas.
         unsafe {
             (*i).excess -= df;
             (*j).excess += df;
@@ -655,6 +657,8 @@ impl McmfCs2 {
     /// Requires base pointers to be set (post-[`Self::cs2_initialize`]).
     #[inline(always)]
     unsafe fn reset_excess_q(&mut self) {
+        // SAFETY: upheld by this function's safety contract: `excq_first`
+        // forms a valid linked list of node pointers terminated by null.
         unsafe {
             while !self.excq_first.is_null() {
                 let next = (*self.excq_first).q_next;
@@ -671,6 +675,7 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn out_of_excess_q(&self, i: *mut Node) -> bool {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { (*i).q_next == self.sentinel_node }
     }
 
@@ -692,6 +697,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn insert_to_excess_q(&mut self, i: *mut Node) {
+        // SAFETY: upheld by this function's safety contract; `excq_last` is
+        // valid whenever `nonempty_excess_q()` returns true.
         unsafe {
             if self.nonempty_excess_q() {
                 (*self.excq_last).q_next = i;
@@ -709,6 +716,8 @@ impl McmfCs2 {
     /// Caller must ensure the queue is non-empty.
     #[inline(always)]
     unsafe fn remove_from_excess_q(&mut self) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract: a non-empty
+        // queue guarantees `excq_first` is a valid node pointer.
         unsafe {
             let i = self.excq_first;
             self.excq_first = (*i).q_next;
@@ -736,6 +745,7 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn reset_stackq(&mut self) {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { self.reset_excess_q() };
     }
 
@@ -745,6 +755,7 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer.
     #[inline(always)]
     unsafe fn stackq_push(&mut self, i: *mut Node) {
+        // SAFETY: upheld by this function's safety contract.
         unsafe {
             (*i).q_next = self.excq_first;
             self.excq_first = i;
@@ -757,6 +768,7 @@ impl McmfCs2 {
     /// Caller must ensure the stack is non-empty.
     #[inline(always)]
     unsafe fn stackq_pop(&mut self) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { self.remove_from_excess_q() }
     }
 
@@ -770,6 +782,8 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn reset_bucket(&mut self, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract: `buckets_base`
+        // points to a live buckets arena of length > `b`.
         unsafe { (*self.buckets_base.add(b)).p_first = self.dnode };
     }
 
@@ -779,6 +793,7 @@ impl McmfCs2 {
     /// Requires base pointers to be set.
     #[inline(always)]
     unsafe fn nonempty_bucket(&self, b: BucketIndex) -> bool {
+        // SAFETY: upheld by this function's safety contract.
         unsafe { (*self.buckets_base.add(b)).p_first != self.dnode }
     }
 
@@ -788,6 +803,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
     unsafe fn insert_to_bucket(&mut self, i: *mut Node, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract; `old_first` is
+        // either a valid node pointer or the `dnode` sentinel.
         unsafe {
             let bucket = self.buckets_base.add(b);
             let old_first = (*bucket).p_first;
@@ -805,6 +822,8 @@ impl McmfCs2 {
     /// Caller must ensure bucket `b` is non-empty.
     #[inline(always)]
     unsafe fn get_from_bucket(&mut self, b: BucketIndex) -> *mut Node {
+        // SAFETY: upheld by this function's safety contract: a non-empty
+        // bucket guarantees `(*bucket).p_first` is a valid node pointer.
         unsafe {
             let bucket = self.buckets_base.add(b);
             let i = (*bucket).p_first;
@@ -819,6 +838,8 @@ impl McmfCs2 {
     /// Caller must pass a valid node pointer and bucket index.
     #[inline(always)]
     unsafe fn remove_from_bucket(&mut self, i: *mut Node, b: BucketIndex) {
+        // SAFETY: upheld by this function's safety contract; `b_prev` /
+        // `b_next` form a valid doubly linked list inside the bucket.
         unsafe {
             let bucket = self.buckets_base.add(b);
             if i == (*bucket).p_first {
@@ -1124,18 +1145,22 @@ impl McmfCs2 {
         }
 
         // overflow test (computed but not enforced, matching C++)
-        // SAFETY: arcs_base set in allocate_arrays; .first pointers are
-        // valid arcs base offsets.
         for ndp in self.node_min..=self.node_max {
             let mut _cap_in: Excess = self.nodes[ndp].excess;
             let mut _cap_out: Excess = -self.nodes[ndp].excess;
+            // SAFETY: post-allocate_arrays, every `.first` pointer is an
+            // offset into the live `arcs_base` arena.
             let a_start = unsafe { self.nodes[ndp].first.offset_from(self.arcs_base) as usize };
+            // SAFETY: same as above; `ndp + 1` is in-bounds because the node
+            // arena has a trailing sentinel.
             let a_end = unsafe { self.nodes[ndp + 1].first.offset_from(self.arcs_base) as usize };
             for ac in a_start..a_end {
                 if self.cap[ac] > 0 {
                     _cap_out += self.cap[ac];
                 }
                 if self.cap[ac] == 0 {
+                    // SAFETY: every `.sister` pointer is an offset into
+                    // the live `arcs_base` arena.
                     let sister_idx =
                         unsafe { self.arcs[ac].sister.offset_from(self.arcs_base) as usize };
                     _cap_in += self.cap[sister_idx];
@@ -2284,8 +2309,11 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
-            // SAFETY: post-cs2_initialize, all .suspended pointers are valid.
+            // SAFETY: post-cs2_initialize, every `.suspended` pointer is an
+            // offset into the live `arcs_base` arena.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: same as above; `i + 1` is in-bounds because the node
+            // arena has a trailing sentinel.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
@@ -2295,6 +2323,8 @@ impl McmfCs2 {
                         break;
                     }
                     self.node_balance[i] -= fa;
+                    // SAFETY: every `.head` pointer is an offset into the
+                    // live `nodes_base` arena.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     self.node_balance[head_idx] += fa;
                 }
@@ -2317,10 +2347,15 @@ impl McmfCs2 {
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
+            // SAFETY: post-cs2_initialize, `.suspended` pointers are offsets
+            // into `arcs_base` and `.head` pointers are offsets into
+            // `nodes_base`; trailing sentinel makes `i + 1` in-bounds.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: see above.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.arcs[a].res_capacity > 0 {
+                    // SAFETY: see above.
                     let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
                     if rc < 0 {
@@ -2346,10 +2381,15 @@ impl McmfCs2 {
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
+            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
+            // are offsets into the corresponding live arenas; trailing
+            // sentinel makes `i + 1` in-bounds.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: see above.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
+                    // SAFETY: see above.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                     println!(
                         "f {:7} {:7} {:10}",
@@ -2385,9 +2425,14 @@ impl McmfCs2 {
         for i in 0..self.n {
             let ni = n_node(i, self.node_min);
             println!("\nNode {ni}");
+            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
+            // are offsets into the corresponding live arenas; trailing
+            // sentinel makes `i + 1` in-bounds.
             let a_start = unsafe { self.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: see above.
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
+                // SAFETY: see above.
                 let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
                 println!(
                     " {{{}}} {} -> {}  cap: {}  cost: {}",
@@ -2672,14 +2717,17 @@ impl McmfSolution {
         let arcs_base = s.arcs_base;
         let nodes_base = s.nodes_base;
         (0..s.n).flat_map(move |i| {
-            // SAFETY: pointers stored in node fields are valid arcs/nodes
-            // offsets after cs2_initialize.
+            // SAFETY: post-cs2_initialize, `.suspended` / `.head` pointers
+            // are offsets into the corresponding live arenas; trailing
+            // sentinel makes `i + 1` in-bounds.
             let a_start = unsafe { s.nodes[i].suspended.offset_from(arcs_base) as usize };
+            // SAFETY: see above.
             let a_stop = unsafe { s.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             (a_start..a_stop).filter_map(move |a| {
                 if s.cap[a] > 0 {
                     let flow = s.cap[a] - s.arcs[a].res_capacity;
                     let tail = n_node(i, s.node_min) as usize;
+                    // SAFETY: see above.
                     let head_idx = unsafe { s.arcs[a].head.offset_from(nodes_base) as usize };
                     let head = n_node(head_idx, s.node_min) as usize;
                     Some((tail, head, flow))
