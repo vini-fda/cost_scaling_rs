@@ -138,15 +138,6 @@ jobs:
       - name: verify MSRV
         run: cargo msrv --output-format minimal verify
 
-  audit:
-    name: audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   semver:
     name: semver-checks
     runs-on: ubuntu-latest
