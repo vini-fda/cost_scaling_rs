@@ -87,8 +87,16 @@ jobs:
         run: sudo apt install qemu-user qemu-user-binfmt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: install C toolchain for reference binary
+      - name: install C toolchain for reference binary (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: install C toolchain for reference binary (macOS)
+        if: runner.os == 'macOS'
+        run: clang --version && make --version # preinstalled with Xcode CLT; just verify
+      - name: install C toolchain for reference binary (Windows)
+        if: runner.os == 'Windows'
+        run: choco install make --no-progress -y
+        shell: pwsh
       # We set up the cross-compiler *after* the basic setup as setting CC would otherwise
       # cause confusion.
       - name: install gcc-cross
