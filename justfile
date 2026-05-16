@@ -28,6 +28,15 @@ clean:
 
 ci: fmt-check clippy test
 
+# Run the miri soundness suite under both aliasing models.
+# Requires the `miri` component on a nightly toolchain:
+#   rustup +nightly component add miri
+miri:
+  MIRIFLAGS="-Zmiri-disable-isolation" \
+    cargo +nightly miri test --test miri_soundness
+  MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-tree-borrows" \
+    cargo +nightly miri test --test miri_soundness
+
 # ---------------------------------------------------------------------------
 # Benchmarks & performance analysis
 # ---------------------------------------------------------------------------

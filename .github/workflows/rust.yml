@@ -62,3 +62,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps
+
+  miri:
+    name: Miri (${{ matrix.borrows }} borrows)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Run the soundness suite under both aliasing models. They disagree
+        # on borderline cases, so a clean bill of health from both gives
+        # the strongest guarantee.
+        include:
+          - borrows: stacked
+            miriflags: -Zmiri-disable-isolation
+          - borrows: tree
+            miriflags: -Zmiri-disable-isolation -Zmiri-tree-borrows
+    env:
+      # -Dwarnings (set globally for the workflow) breaks the build when
+      # miri's instrumented std emits any lint, so override here. The
+      # release jobs above remain strict.
+      RUSTFLAGS: ""
+      MIRIFLAGS: ${{ matrix.miriflags }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # miri builds a separate target/miri directory, so cache it too.
+          shared-key: miri-${{ matrix.borrows }}
+      - name: Run miri soundness suite
+        run: cargo miri test --test miri_soundness
