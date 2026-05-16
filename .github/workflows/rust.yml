@@ -131,10 +131,6 @@ jobs:
         # the strongest guarantee.
         borrows: [stacked, tree]
         include:
-          - borrows: stacked
-            miriflags: -Zmiri-disable-isolation
-          - borrows: tree
-            miriflags: -Zmiri-disable-isolation -Zmiri-tree-borrows
           - host_target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - host_target: i686-unknown-linux-gnu
@@ -158,7 +154,7 @@ jobs:
       # miri's instrumented std emits any lint, so override here. The
       # release jobs above remain strict.
       RUSTFLAGS: ""
-      MIRIFLAGS: ${{ matrix.miriflags }}
+      MIRIFLAGS: ${{ matrix.borrows == 'tree' && '-Zmiri-disable-isolation -Zmiri-tree-borrows' || '-Zmiri-disable-isolation' }}
       HOST_TARGET: ${{ matrix.host_target }}
     steps:
       - uses: actions/checkout@v6
