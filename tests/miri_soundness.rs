@@ -1,23 +1,4 @@
 //! Soundness tests for the unsafe pointer-based McmfCs2 implementation.
-//!
-//! Each test exercises a code path in the solver and is small enough to run
-//! under `cargo +nightly miri test --test miri_soundness` in a reasonable
-//! time (miri is 10–100x slower than native execution).
-//!
-//! Coverage targets — every `unsafe` block in `src/lib.rs` is hit:
-//!
-//!   * `set_arc` / `pre_processing` — arc-reordering swaps + drain pointer
-//!     compensation (`arc.head.sub(node_min)`).
-//!   * `cs2_initialize` — sentinel pointer setup, negative-arc saturation,
-//!     dnode/dummy_node pushes.
-//!   * `discharge` / `relabel` — pointer iteration through residual arcs.
-//!   * `price_update` / `up_node_scan` — bucket-based Dijkstra with
-//!     remove_from_bucket / insert_to_bucket pointer manipulation.
-//!   * `price_in` / `price_out` — suspended-arc exchanges (calls `exchange`
-//!     with pointer-typed sister fixups).
-//!   * `price_refine` / `compute_prices` — DFS via b_next pointer chains and
-//!     cycle cancellation through residual arcs.
-//!   * `flows` / `prices` iterators — `offset_from` conversions on output.
 
 use cost_scaling_rs::McmfCs2;
 use cost_scaling_rs::goto::{GotoParams, generate_to_string};
