@@ -4,11 +4,6 @@
 //! translated from the original C implementation.
 
 #![warn(missing_docs)]
-// Forbid the panic-emitting macros in the library crate. Build-time and
-// solver-time errors are surfaced through Result<_, Cs2Error> instead.
-// `#[cfg(test)]` modules and doc-tests are exempted so they can still
-// `.expect()` / `.unwrap()` for terseness; integration tests in `tests/`
-// and the `cost-scaling-rs` binary are separate crates and unaffected.
 #![cfg_attr(not(test), deny(clippy::panic))]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
