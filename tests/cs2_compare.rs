@@ -20,7 +20,9 @@ fn project_root() -> PathBuf {
 /// Returns the path to the C cs2 binary, building it if necessary.
 fn cs2_binary() -> PathBuf {
     let cs2_dir = project_root().join("cs2");
-    let bin = cs2_dir.join("cs2");
+    // The C makefile emits `cs2.exe` on Windows and `cs2` everywhere else;
+    // `EXE_SUFFIX` gives us ".exe" or "" accordingly.
+    let bin = cs2_dir.join(format!("cs2{}", std::env::consts::EXE_SUFFIX));
 
     BUILD_CS2.call_once(|| {
         if !bin.exists() {
