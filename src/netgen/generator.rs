@@ -10,11 +10,11 @@
 //! - a min-cost flow problem otherwise.
 //!
 //! The four phases are:
-//! 1. Distribute total supply across the source nodes ([`create_supply`]).
+//! 1. Distribute total supply across the source nodes (`create_supply`).
 //! 2. Build a forest of source-rooted "chains" through the transshipment
 //!    nodes via the `pred[]` linked list.
 //! 3. For each chain, pick sinks, distribute the chain's supply, place
-//!    skeleton arcs, and sprinkle "rubbish" (chord) arcs via [`pick_head`].
+//!    skeleton arcs, and sprinkle "rubbish" (chord) arcs via `pick_head`.
 //! 4. Add more rubbish arcs out of every transshipment sink.
 
 use std::fmt;

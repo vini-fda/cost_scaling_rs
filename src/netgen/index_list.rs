@@ -9,7 +9,7 @@
 //! - [`IndexList::size`] / [`IndexList::pseudo_size`].
 //!
 //! The `pseudo_size` quirk (the list's reported "almost size" being decremented
-//! even when `remove` finds nothing) is intentional: NETGEN's [`pick_head`]
+//! even when `remove` finds nothing) is intentional: NETGEN's `pick_head`
 //! routine depends on it. The C source explicitly marks it as "an apparent bug
 //! in the original definition of the NETGEN program" that we must perpetuate.
 //!
