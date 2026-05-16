@@ -33,5 +33,11 @@ debug = 2
 inherits = "release"
 debug = 2
 
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
 [lints.clippy]
 unwrap_used = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "warn"
+missing_safety_doc = "deny"
