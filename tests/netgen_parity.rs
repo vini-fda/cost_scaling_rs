@@ -198,18 +198,3 @@ fn problem_28_byte_identical() {
 fn problem_36_byte_identical() {
     run_fixture(&FIXTURES[5]);
 }
-
-#[test]
-fn rng_trace_matches_c() {
-    // Capturing the trace for documentation: the 16 outputs of `random(1, 1_000_000)`
-    // from seed 13_502_460 against a freshly built C reference are:
-    //
-    // ```
-    // 62286 397840 652671 474146 20605 661032 478195 866960
-    // 719297 302650 470414 483395 753149 594545 273660 183396
-    // ```
-    //
-    // This is asserted in the unit test `src/netgen/rng.rs::tests::first_outputs_match_c_reference`.
-    // We don't duplicate it here — the by-problem byte-identity tests above
-    // would catch any RNG divergence anyway.
-}
