@@ -25,6 +25,41 @@ a <tail> <head> <lower_bound> <upper_bound> <cost>
 
 `testdata/sample.inp` describes[^1] a 6-node, 8-arc network: node 1 supplies 10 units, node 6 demands 10. Each edge label shows the capacity bounds (upper, lower) and the per-unit cost.
 
+```dimacs
+p min 6 8
+c min-cost flow problem with 6 nodes and 8 arcs
+n 1 10
+c supply of 10 at node 1
+n 6 -10
+c demand of 10 at node 6
+c arc list follows
+c arc has <tail> <head> <capacity l.b.> <capacity u.b> <cost>
+a 1 2 0 4  1
+a 1 3 0 8  5
+a 2 3 0 5  0
+a 3 5 0 10 1
+a 5 4 0 8  0
+a 5 6 0 8  9
+a 4 2 0 8  1
+a 4 6 0 8  1
+```
+
+The solution output, from `cargo run -- testdata/sample.inp` is:
+
+```
+s 70
+f       1       2          4
+f       1       3          6
+f       2       3          4
+f       3       5         10
+f       4       6          8
+f       4       2          0
+f       5       4          8
+f       5       6          2
+```
+
+The figure below represents the problem and the solution by diagramming the graph:
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/sample-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="diagrams/sample-light.png">
