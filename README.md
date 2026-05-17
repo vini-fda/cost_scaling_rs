@@ -4,15 +4,7 @@ A Rust implementation of the **CS2** minimum-cost maximum-flow algorithm, based 
 
 CS2 solves the [minimum-cost flow problem](https://en.wikipedia.org/wiki/Minimum-cost_flow_problem): given a directed network with arc capacities and per-unit flow costs, find the cheapest way to route a specified amount of flow from sources to sinks.
 
-## Example
 
-`testdata/sample.inp` [^1] describes a 6-node, 8-arc network: node 1 supplies 10 units, node 6 demands 10. Each edge label shows the capacity bounds (upper, lower) and the per-unit cost.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="diagrams/sample-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="diagrams/sample-light.png">
-  <img alt="Min-cost flow example: 6 nodes, 8 arcs" src="diagrams/sample-dark.png">
-</picture>
 
 
 
@@ -28,6 +20,16 @@ p min <nodes> <arcs>
 n <node_id> <supply>
 a <tail> <head> <lower_bound> <upper_bound> <cost>
 ```
+
+### Example
+
+`testdata/sample.inp` [^1] describes a 6-node, 8-arc network: node 1 supplies 10 units, node 6 demands 10. Each edge label shows the capacity bounds (upper, lower) and the per-unit cost.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/sample-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/sample-light.png">
+  <img alt="Min-cost flow example: 6 nodes, 8 arcs" src="diagrams/sample-dark.png">
+</picture>
 
 ### As a library
 
