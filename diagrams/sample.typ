@@ -71,3 +71,65 @@ Node $1$ has supply $+10$; node $6$ has demand $10$ (therefore a supply of $-10$
   edge((3, 0), (1, 0), "-|>", $capcost(0, 8, 1)$, bend: -40deg, label-side: center, label-fill: bg),
   edge((3, 0), (4, 1), "-|>", $capcost(0, 8, 1)$, label-side: center, label-fill: bg),
 )
+
+#set align(left)
+
+== Solution
+
+The solution yields an optimal cost of $70$ with the flows below.
+
+Saturated arcs ($"flow" = u$) are drawn thicker in green; the one unused arc ($4 -> 2$) is dashed.
+
+// Edge helper: thick green when saturated, dashed dim when zero, normal otherwise.
+#let solflow(from, to, value, sat: false, ..args) = {
+  let stroke = if value == 0 {
+    (paint: fg, dash: "dashed", thickness: 0.4pt)
+  } else if sat {
+    1.2pt + green
+  } else {
+    0.6pt + fg
+  }
+  edge(from, to, "-|>", $value$, stroke: stroke, label-side: center, label-fill: bg, ..args)
+}
+
+#set align(center)
+
+#diagram(
+  spacing: (5em, 3.5em),
+  node-stroke: 0.8pt + fg,
+  node-shape: circle,
+  node-fill: gradient.radial(bg, blue, radius: 200%),
+  edge-stroke: 0.6pt + fg,
+  label-size: 8pt,
+
+  node((0, 1), align(center)[1], fill: supply-fill, name: <s1>),
+  node((1, 0), align(center)[2]),
+  node((2, 1), align(center)[3]),
+  node((3, 0), align(center)[4]),
+  node((3, 2), align(center)[5]),
+  node((4, 1), align(center)[6], fill: demand-fill, name: <s6>),
+
+  node(
+    <s1.north-east>,
+    circle(fill: fg, radius: 5pt, text(0.5em, $+ 10$, fill: bg)),
+    stroke: none,
+    fill: none,
+    inset: 0pt,
+  ),
+  node(
+    <s6.north-east>,
+    circle(fill: fg, radius: 5pt, text(0.5em, $- 10$, fill: bg)),
+    stroke: none,
+    fill: none,
+    inset: 0pt,
+  ),
+
+  solflow((0, 1), (1, 0), 4, sat: true),
+  solflow((0, 1), (2, 1), 6),
+  solflow((1, 0), (2, 1), 4),
+  solflow((2, 1), (3, 2), 10, sat: true),
+  solflow((3, 2), (3, 0), 8, sat: true),
+  solflow((3, 2), (4, 1), 2),
+  solflow((3, 0), (1, 0), 0, bend: -40deg),
+  solflow((3, 0), (4, 1), 8, sat: true),
+)
