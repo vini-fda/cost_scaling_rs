@@ -9,10 +9,12 @@
 
 = `testdata/sample.inp`: min-cost flow, 6 nodes, 8 arcs
 
-Each edge is labeled $u\/c$, where $u$ is the upper capacity and $c$ is the
-per-unit cost; the lower bound is $0$ on every arc in this instance.
+#let colred(x) = text(fill: red, $#x$)
 
-Node $1$ has supply $+10$; node $6$ has demand $-10$.
+Each edge shows the capacity range $ell <= c <= u$ above the line and the
+per-unit cost below. Node $1$ has supply $+10$; node $6$ has demand $-10$.
+
+#let capcost(lower, upper, cost) = $attach(ceil.r, tl: upper, bl: lower) cost$
 
 #diagram(
   spacing: (5em, 3.5em),
@@ -43,12 +45,12 @@ Node $1$ has supply $+10$; node $6$ has demand $-10$.
     inset: 0pt,
   ),
 
-  edge((0, 1), (1, 0), "-|>", $4\/1$),
-  edge((0, 1), (2, 1), "-|>", $8\/5$),
-  edge((1, 0), (2, 1), "-|>", $5\/0$),
-  edge((2, 1), (3, 2), "-|>", $10\/1$),
-  edge((3, 2), (3, 0), "-|>", $8\/0$),
-  edge((3, 2), (4, 1), "-|>", $8\/9$),
-  edge((3, 0), (1, 0), "-|>", $8\/1$, bend: -40deg),
-  edge((3, 0), (4, 1), "-|>", $8\/1$),
+  edge((0, 1), (1, 0), "-|>", $capcost(0, 4, 1)$, label-side: center),
+  edge((0, 1), (2, 1), "-|>", $capcost(0, 8, 5)$, label-side: center),
+  edge((1, 0), (2, 1), "-|>", $capcost(0, 5, 0)$, label-side: center),
+  edge((2, 1), (3, 2), "-|>", $capcost(0, 10, 1)$, label-side: center),
+  edge((3, 2), (3, 0), "-|>", $capcost(0, 8, 0)$, label-side: center),
+  edge((3, 2), (4, 1), "-|>", $capcost(0, 8, 9)$, label-side: center),
+  edge((3, 0), (1, 0), "-|>", $capcost(0, 8, 1)$, bend: -40deg, label-side: center),
+  edge((3, 0), (4, 1), "-|>", $capcost(0, 8, 1)$, label-side: center),
 )
