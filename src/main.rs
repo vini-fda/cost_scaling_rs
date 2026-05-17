@@ -3,11 +3,15 @@ use std::io::{BufWriter, Write};
 use cost_scaling_rs::McmfCs2;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args()
-        .nth(1)
-        .ok_or("Usage: cost-scaling-rs <dimacs-file>")?;
+    const HELP_USAGE: &str = "Usage: cost-scaling-rs <dimacs-file>";
+    let first_arg = std::env::args().nth(1).ok_or(HELP_USAGE)?;
 
-    let solver = McmfCs2::from_dimacs_file(&path)?;
+    if first_arg == "--help" || first_arg == "-h" {
+        println!("{HELP_USAGE}");
+        return Ok(());
+    }
+
+    let solver = McmfCs2::from_dimacs_file(&first_arg)?;
     let solution = solver
         .min_cost(false, false)
         .map_err(|e| format!("Solver error: {e:?}"))?;
