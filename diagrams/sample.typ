@@ -7,14 +7,18 @@
 #set page(width: auto, height: auto, margin: 1cm)
 #set text(size: 10pt)
 
-= `testdata/sample.inp`: min-cost flow, 6 nodes, 8 arcs
-
 #let colred(x) = text(fill: red, $#x$)
 
-Each edge shows the capacity range $ell <= c <= u$ above the line and the
-per-unit cost below. Node $1$ has supply $+10$; node $6$ has demand $-10$.
-
 #let capcost(lower, upper, cost) = $attach(ceil.r, tl: upper, bl: lower) cost$
+
+= Example: min-cost flow, 6 nodes, 8 arcs
+
+Each edge shows the capacity lower and upper bounds ($ell <= c <= u$) to the left and the
+per-unit cost $c$ to the right, denoted $capcost(ell, u, c)$.
+
+Node $1$ has supply $+10$; node $6$ has demand $10$ (therefore a supply of $-10$), denoted with black circles on the upper right.
+
+#set align(center)
 
 #diagram(
   spacing: (5em, 3.5em),
