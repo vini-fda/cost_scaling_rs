@@ -23,7 +23,7 @@ a <tail> <head> <lower_bound> <upper_bound> <cost>
 
 ### Example
 
-`testdata/sample.inp` [^1] describes a 6-node, 8-arc network: node 1 supplies 10 units, node 6 demands 10. Each edge label shows the capacity bounds (upper, lower) and the per-unit cost.
+`testdata/sample.inp` describes[^1] a 6-node, 8-arc network: node 1 supplies 10 units, node 6 demands 10. Each edge label shows the capacity bounds (upper, lower) and the per-unit cost.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/sample-dark.png">
