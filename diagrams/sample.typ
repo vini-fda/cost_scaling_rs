@@ -4,7 +4,7 @@
 
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, edge, node
 
-#set page(width: auto, height: auto, margin: 1cm)
+#set page(width: auto, height: auto, margin: 1cm, fill: none)
 #set text(size: 10pt)
 
 #let colred(x) = text(fill: red, $#x$)
