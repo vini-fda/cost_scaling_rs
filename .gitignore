@@ -1,3 +1,5 @@
 /target
 *.dSYM
 *.gz
+*.pdf
+.DS_Store
