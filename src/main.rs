@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let solver = McmfCs2::from_dimacs_file(&first_arg)?;
     let solution = solver
-        .min_cost(false, false)
+        .min_cost()
         .map_err(|e| format!("Solver error: {e:?}"))?;
 
     let mut out = BufWriter::new(std::io::stdout().lock());

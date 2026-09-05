@@ -69,9 +69,14 @@ a 4 3 0 2 1
 a 2 4 0 2 5
 ";
 
-fn solve_with(dimacs: &str, check: bool, comp_duals: bool) -> f64 {
+fn solve_with(dimacs: &str, check_solution: bool, comp_duals: bool) -> f64 {
     let solver = McmfCs2::from_dimacs(dimacs).expect("parse");
-    let solution = solver.min_cost(check, comp_duals).expect("solve");
+
+    let solution = solver
+        .check_solution(check_solution)
+        .comp_duals(comp_duals)
+        .min_cost()
+        .expect("solve");
     // Drain the iterators so any UB in flows()/prices() is observed.
     let _flows: Vec<_> = solution.flows().collect();
     let _prices: Vec<_> = solution.prices().collect();
@@ -150,7 +155,11 @@ fn programmatic_build() {
     s.set_arc(2, 3, 0, 2, 1).expect("set_arc");
     s.set_arc(2, 4, 0, 3, 3).expect("set_arc");
     s.set_arc(3, 4, 0, 5, 1).expect("set_arc");
-    let sol = s.min_cost(true, true).expect("solve");
+    let sol = s
+        .check_solution(true)
+        .comp_duals(true)
+        .min_cost()
+        .expect("solve");
     assert!(sol.objective_cost > 0.0);
     let _ = sol.flows().count();
     let _ = sol.prices().count();

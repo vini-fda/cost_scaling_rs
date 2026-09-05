@@ -287,7 +287,7 @@ impl From<Cs2Error> for DimacsLoadError {
 ///              a 2 4 0 3 3\n\
 ///              a 3 4 0 5 1\n";
 /// let solver = McmfCs2::from_dimacs(input)?;
-/// let solution = solver.min_cost(false, false)?;
+/// let solution = solver.min_cost()?;
 /// assert!(solution.objective_cost > 0.0);
 /// # Ok(()) }
 /// ```
@@ -310,8 +310,7 @@ impl From<Cs2Error> for DimacsLoadError {
 /// solver.set_arc(2, 3, 0, 2, 1)?;
 /// solver.set_arc(2, 4, 0, 3, 3)?;
 /// solver.set_arc(3, 4, 0, 5, 1)?;
-///
-/// let solution = solver.min_cost(false, false)?;
+/// let solution = solver.min_cost()?;
 ///
 /// for (tail, head, flow) in solution.flows() {
 ///     if flow > 0 {
@@ -325,6 +324,11 @@ pub struct McmfCs2 {
     n: usize,
     /// Number of arcs.
     m: usize,
+
+    /// Check feasibility/optimality during `min_cost`. Note that this adds high overhead. False by default.
+    check_solution: bool,
+    /// Enable to compute prices during `min_cost`. False by default.
+    comp_duals: bool,
 
     /// Array containing original capacities.
     cap: Vec<i64>,
@@ -524,6 +528,9 @@ impl McmfCs2 {
             n: num_nodes,
             m: num_arcs,
 
+            check_solution: false,
+            comp_duals: false,
+
             cap: Vec::new(),
             nodes: Vec::new(),
             nodes_base: std::ptr::null_mut(),
@@ -591,6 +598,19 @@ impl McmfCs2 {
         };
         solver.allocate_arrays();
         solver
+    }
+
+    /// Sets `check_solution` to `value`.
+    #[must_use]
+    pub fn check_solution(mut self, value: bool) -> Self {
+        self.check_solution = value;
+        self
+    }
+    /// Sets `comp_duals` to `value`.
+    #[must_use]
+    pub fn comp_duals(mut self, value: bool) -> Self {
+        self.comp_duals = value;
+        self
     }
 
     /// Parse a DIMACS `.min` format string and construct a solver.
@@ -2501,6 +2521,8 @@ impl McmfCs2 {
     /// Main loop of the successive approximation algorithm
     /// (Goldberg §1, Fig 1: *Min-Cost*).
     ///
+    /// The solver option is [`Self::comp_duals`]. `false` by default.
+    ///
     /// Starting from `epsilon = max_cost * dn`, repeatedly:
     /// 1. Calls [`refine`](Self::refine) to convert the current pseudoflow
     ///    into an epsilon-optimal flow.
@@ -2513,7 +2535,8 @@ impl McmfCs2 {
     ///
     /// Terminates when `epsilon < 1`, at which point the flow is optimal.
     #[inline(never)]
-    fn cs2(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
+    fn cs2(&mut self, objective_cost: &mut f64) -> Result<(), Cs2Error> {
+        let comp_duals = self.comp_duals;
         let mut scaling_done = false;
 
         self.update_epsilon();
@@ -2557,17 +2580,18 @@ impl McmfCs2 {
 
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, printing the solution.
     ///
-    /// Args
-    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
-    /// - `comp_duals`: Enable to compute prices
+    /// The solver options are set by [`Self::check_solution`] and [`Self::comp_duals`]. Both are `false` by default.
     ///
     /// # Errors
     /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
     /// circulation, or any other [`Cs2Error`] variant produced by the
     /// preprocessing / cost-scaling phases.
-    pub fn run_cs2(&mut self, check_solution: bool, comp_duals: bool) -> Result<(), Cs2Error> {
+    pub fn run_cs2(&mut self) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing()?;
+
+        let check_solution = self.check_solution;
+        let comp_duals = self.comp_duals;
 
         // check solution setup
         if check_solution {
@@ -2590,7 +2614,7 @@ impl McmfCs2 {
         );
 
         let mut objective_cost: f64 = 0.0;
-        self.cs2(&mut objective_cost, comp_duals)?;
+        self.cs2(&mut objective_cost)?;
 
         let t = 0.0f64;
         println!("c time:         {t:15.2}    cost:       {objective_cost:15.0}");
@@ -2640,21 +2664,17 @@ impl McmfCs2 {
     /// Executes the cost-scaling minimum-cost maximum-flow algorithm, returning the solution
     /// as a [`McmfSolution`] object.
     ///
-    /// Args
-    /// - `check_solution`: Check feasibility/optimality. Note that this adds high overhead.
-    /// - `comp_duals`: Enable to compute prices
+    /// The solver options are set by [`Self::check_solution`] and [`Self::comp_duals`]. Both are `false` by default.
     ///
     /// # Errors
     /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
     /// circulation, or any other [`Cs2Error`] variant produced by the
     /// preprocessing / cost-scaling phases.
-    pub fn min_cost(
-        mut self,
-        check_solution: bool,
-        comp_duals: bool,
-    ) -> Result<McmfSolution, Cs2Error> {
+    pub fn min_cost(mut self) -> Result<McmfSolution, Cs2Error> {
         // ordering
         self.pre_processing()?;
+
+        let check_solution = self.check_solution;
 
         // check solution setup
         if check_solution {
@@ -2669,7 +2689,7 @@ impl McmfCs2 {
         self.cs2_initialize();
 
         let mut objective_cost = 0.0;
-        self.cs2(&mut objective_cost, comp_duals)?;
+        self.cs2(&mut objective_cost)?;
 
         if check_solution {
             if !self.is_feasible() {

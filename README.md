@@ -83,7 +83,9 @@ println!("Optimal cost: {}", solution.objective_cost);
 ```rust
 use cost_scaling_rs::McmfCs2;
 
-let mut solver = McmfCs2::new(6, 8); // 6 nodes, 8 arcs
+let num_nodes = 6;
+let num_arcs = 8;
+let mut solver = McmfCs2::new(num_nodes, num_arcs); // 6 nodes, 8 arcs
 
 // Set supply (+) and demand (-) BEFORE adding arcs.
 solver.set_supply_demand_of_node(1, 10)?;  // source: +10
@@ -93,8 +95,7 @@ solver.set_supply_demand_of_node(6, -10)?; // sink: -10
 solver.set_arc(1, 2, 0, 4, 1)?;
 solver.set_arc(1, 3, 0, 8, 5)?;
 // ... more arcs ...
-
-let solution = solver.min_cost(false, false)?;
+let solution = solver.min_cost()?;
 println!("Optimal cost: {}", solution.objective_cost);
 
 for (tail, head, flow) in solution.flows() {
