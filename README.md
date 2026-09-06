@@ -74,7 +74,7 @@ The figure below represents the problem and the solution by diagramming the grap
 use cost_scaling_rs::McmfCs2;
 
 let solver = McmfCs2::from_dimacs_file("problem.min")?;
-let solution = solver.min_cost(false, false)?;
+let solution = solver.min_cost()?;
 println!("Optimal cost: {}", solution.objective_cost);
 ```
 
@@ -94,7 +94,12 @@ solver.set_supply_demand_of_node(6, -10)?; // sink: -10
 // Add arcs: (tail, head, lower_bound, upper_bound, cost)
 solver.set_arc(1, 2, 0, 4, 1)?;
 solver.set_arc(1, 3, 0, 8, 5)?;
-// ... more arcs ...
+solver.set_arc(2, 3, 0, 5, 0)?;
+solver.set_arc(3, 5, 0, 10, 1)?;
+solver.set_arc(5, 4, 0, 8, 0)?;
+solver.set_arc(5, 6, 0, 8, 9)?;
+solver.set_arc(4, 2, 0, 8, 1)?;
+solver.set_arc(4, 6, 0, 8, 1)?;
 let solution = solver.min_cost()?;
 println!("Optimal cost: {}", solution.objective_cost);
 
@@ -106,6 +111,19 @@ for (tail, head, flow) in solution.flows() {
 ```
 
 > **Note:** When building problems programmatically, call `set_supply_demand_of_node` **before** `set_arc`. This is required because `set_arc` adjusts node excess internally for arcs with nonzero lower bounds.
+
+Node IDs are `1..=num_nodes`, including isolated nodes. Add exactly the declared
+number of arcs; incomplete builders and excess insertions return errors. Repeated
+supply setters replace the previous value, but setting supplies after adding arcs
+is rejected. `min_cost` consumes the solver; the legacy `run_cs2` method cannot be
+used to solve or rebuild the same instance again after preprocessing.
+
+Costs, capacities, and supplies use `i64`. Internal cost scaling and price/excess
+updates must also fit: unsupported arithmetic returns `PriceOverflow` or
+`ExcessOverflow` in both debug and release builds. The returned objective is an
+approximate `f64`, so integer objectives above `2^53` need not be exact. Enable
+`check_solution(true)` to additionally verify feasibility and optimality; this
+also supports nonzero lower bounds.
 
 ### As a CLI
 
@@ -129,10 +147,20 @@ cargo test
 ```
 
 This runs:
+
 - **Unit tests** for the DIMACS parser and GOTO problem generator
-- **Integration tests** that compare objective costs and per-arc flows between Rust and C across 41 problems: static test files, procedurally generated GOTO networks of various sizes (15 to 1000 nodes), and hand-crafted edge cases (parallel arcs, lower bounds, cycles, bottlenecks, etc.)
+- **Integration tests** that compare Rust and C across 41 problems: static test files, procedurally generated GOTO networks of various sizes (15 to 1000 nodes), and hand-crafted edge cases (parallel arcs, lower bounds, cycles, bottlenecks, etc.). The zero-cost self-loop case allows different equally optimal loop flows.
+- **Correctness regressions** for input validation, isolated nodes, overflow, lower bounds, builder lifecycle, self-loops, output, and heuristic boundaries. A separate brute-force oracle enumerates all flow assignments on 500 small graphs, checking both feasible and infeasible cases independently of C.
 
 The C binary is compiled automatically on first test run.
+
+The solver unit tests and graph regressions are also checked with Miri in CI:
+
+```bash
+cargo +nightly miri test --lib --test miri_soundness --test correctness_regressions
+```
+
+The subprocess-based output test runs natively and is skipped under Miri.
 
 ## Benchmarks
 

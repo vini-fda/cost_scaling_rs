@@ -125,11 +125,8 @@ fn parallel_arcs() {
 
 #[test]
 fn lower_bounds() {
-    // is_feasible/check_cs's pre-existing accounting of lower-bound arcs
-    // (see cs2_compare integration tests, which always pass false/false)
-    // is independent of the unsafe-code soundness we want to verify here,
-    // so skip those checks. Cost must still be the known-optimal value.
-    let cost = solve_with(LOWER_BOUNDS, false, false);
+    // Exercise both verification and dual computation on transformed bounds.
+    let cost = solve_with(LOWER_BOUNDS, true, true);
     // Forced flow: 3 units through 1->2 (lower) + 3 through 2->3 (lower),
     // plus 7 more units balancing 1's supply (10) to 3's demand (-10),
     // along the only path: cost = 10*(2+3) = 50.

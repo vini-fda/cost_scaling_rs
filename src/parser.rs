@@ -72,6 +72,13 @@ pub struct Arc {
 pub enum ParseError {
     /// A required problem line (`p min ...`) was not found.
     MissingProblemLine,
+    /// The number of arc records differs from the problem line.
+    ArcCountMismatch {
+        /// Number of arcs declared in the problem line.
+        expected: i64,
+        /// Number of arc records present.
+        actual: usize,
+    },
     /// A line could not be parsed.
     InvalidLine {
         /// 1-based line number where the error occurred.
@@ -85,6 +92,9 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseError::MissingProblemLine => write!(f, "missing problem line (p min ...)"),
+            ParseError::ArcCountMismatch { expected, actual } => {
+                write!(f, "expected {expected} arcs, received {actual}")
+            }
             ParseError::InvalidLine { line_num, message } => {
                 write!(f, "line {line_num}: {message}")
             }
@@ -131,6 +141,12 @@ pub fn parse(input: &str) -> Result<DimacsMin, ParseError> {
                 }
                 let n = parse_i64(parts.next(), line_num, "nodes")?;
                 let m = parse_i64(parts.next(), line_num, "arcs")?;
+                if problem.is_some() {
+                    return Err(err("duplicate problem line"));
+                }
+                if n < 0 || m < 0 {
+                    return Err(err("node and arc counts must be nonnegative"));
+                }
                 problem = Some((n, m));
             }
             "n" => {
@@ -162,6 +178,13 @@ pub fn parse(input: &str) -> Result<DimacsMin, ParseError> {
     }
 
     let (nodes, arcs_count) = problem.ok_or(ParseError::MissingProblemLine)?;
+
+    if usize::try_from(arcs_count).ok() != Some(arcs.len()) {
+        return Err(ParseError::ArcCountMismatch {
+            expected: arcs_count,
+            actual: arcs.len(),
+        });
+    }
 
     Ok(DimacsMin {
         comments,
