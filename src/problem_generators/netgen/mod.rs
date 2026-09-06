@@ -29,12 +29,14 @@
 //! write_dimacs(&inst, &mut stdout(), 1).expect("write");
 //! ```
 
+mod diagram;
 mod generator;
 mod index_list;
 mod rng;
 
 use std::io::{self, Write};
 
+pub use diagram::write_typst;
 pub use generator::{NetgenError, NetgenInstance, NetgenParams, ProblemKind, generate};
 
 /// Write a [`NetgenInstance`] in DIMACS format to `w`, matching the C

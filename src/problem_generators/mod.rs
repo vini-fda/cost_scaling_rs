@@ -2,3 +2,4 @@
 
 pub mod goto;
 pub mod netgen;
+pub mod typst;
