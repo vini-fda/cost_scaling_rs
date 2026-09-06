@@ -1655,10 +1655,10 @@ impl McmfCs2 {
             let arcs_base = self.arcs_base;
             let mut bad_found = 0;
             let mut n_in_bad = 0;
-            let cut_on_i = self.cut_on as i64;
             let sentinel_node = self.sentinel_node;
 
             'restart: loop {
+                let cut_on_i = self.cut_on as i64;
                 let mut i_ptr = self.nodes_base;
                 while i_ptr < sentinel_node {
                     let initial_first = (*i_ptr).first;
@@ -2796,5 +2796,35 @@ impl McmfSolution {
             n_bad_relabel: s.n_bad_relabel,
             n_prefine: s.n_prefine,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CUT_OFF_GAP, CUT_OFF_MIN, McmfCs2};
+
+    #[test]
+    fn price_in_restart_uses_widened_cut_on() {
+        let mut solver = McmfCs2::new(3, 2);
+        solver.set_arc(1, 2, 0, 1, 1).expect("first arc");
+        solver.set_arc(1, 3, 0, 1, 5).expect("second arc");
+        solver.pre_processing().expect("preprocessing");
+        solver.m *= 2;
+        solver.cs2_initialize();
+
+        // Costs are now 4 and 20. Suspend both arcs from node 1, and
+        // make the first arc admissible so price_in must restart.
+        solver.nodes[0].first = solver.nodes[1].suspended;
+        solver.nodes[1].price = 5;
+        solver.epsilon = 1;
+        solver.cut_off_factor = CUT_OFF_MIN;
+        solver.cut_off = CUT_OFF_MIN;
+        solver.cut_on = CUT_OFF_MIN * CUT_OFF_GAP;
+        solver.n_bad_pricein = 1;
+
+        assert_eq!(solver.price_in(), 1);
+        // The cost-20 arc is outside the old threshold (9.6), but inside
+        // the widened threshold (38.4), so both arcs must now be active.
+        assert_eq!(solver.nodes[0].first, solver.nodes[0].suspended);
     }
 }
