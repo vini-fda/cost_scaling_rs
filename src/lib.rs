@@ -2451,7 +2451,7 @@ impl McmfCs2 {
 
     /// Check pre-initialization transformed balances against flow above each lower bound.
     ///
-    /// - initial_balances: Per-node supply/demand balance.
+    /// - `initial_balances`: Per-node supply/demand balance.
     fn is_feasible(&self, initial_balances: &[Excess]) -> bool {
         debug_assert_eq!(initial_balances.len(), self.n);
         // Wider scratch sums avoid overflow due only to the order of checking
