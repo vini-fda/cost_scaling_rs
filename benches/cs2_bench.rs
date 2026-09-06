@@ -21,9 +21,7 @@ fn bench_goto(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &input, |b, input| {
             b.iter(|| {
                 let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
-                solver
-                    .min_cost(false, false)
-                    .expect("failed to solve min-cost flow")
+                solver.min_cost().expect("failed to solve min-cost flow")
             });
         });
     }

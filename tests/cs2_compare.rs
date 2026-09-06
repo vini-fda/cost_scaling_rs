@@ -56,7 +56,7 @@ struct SolverOutput {
 /// Run the Rust solver on a DIMACS input string.
 fn run_rust(input: &str) -> SolverOutput {
     let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
-    let solution = solver.min_cost(false, false).expect("Rust solver failed");
+    let solution = solver.min_cost().expect("Rust solver failed");
 
     let mut flows = BTreeMap::new();
     for (tail, head, flow) in solution.flows() {
@@ -689,7 +689,7 @@ fn edge_infeasible_insufficient_capacity() {
     solver
         .set_supply_demand_of_node(3, -10)
         .expect("set_supply");
-    assert!(solver.min_cost(false, false).is_err());
+    assert!(solver.min_cost().is_err());
 }
 
 /// Infeasible: sink unreachable from source.
@@ -700,7 +700,7 @@ fn edge_infeasible_disconnected() {
     solver.set_arc(3, 4, 0, 10, 1).expect("set_arc");
     solver.set_supply_demand_of_node(1, 5).expect("set_supply");
     solver.set_supply_demand_of_node(4, -5).expect("set_supply");
-    assert!(solver.min_cost(false, false).is_err());
+    assert!(solver.min_cost().is_err());
 }
 
 /// Feasible with `check_solution` enabled: verifies internal consistency.
@@ -717,7 +717,9 @@ a 3 4 0 10 5
 ";
     let solver = McmfCs2::from_dimacs(input).expect("failed to parse DIMACS input");
     let solution = solver
-        .min_cost(true, true)
+        .check_solution(true)
+        .comp_duals(true)
+        .min_cost()
         .expect("should be feasible and CS-optimal");
     assert!((solution.objective_cost - 20.0).abs() < 0.5);
 }
