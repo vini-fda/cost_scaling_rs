@@ -1,5 +1,5 @@
 # Golden-file fixtures must be byte-identical across platforms.
 # Mark them binary so Git never rewrites line endings on checkout
 # (e.g. on Windows with core.autocrlf=true), which would break
-# tests in src/goto.rs that compare generator output to these files.
+# tests in src/problem_generators/goto/mod.rs that compare generator output to these files.
 testdata/** -text

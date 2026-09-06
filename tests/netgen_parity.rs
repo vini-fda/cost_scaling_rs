@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use cost_scaling_rs::netgen::{NetgenParams, generate, write_dimacs};
+use cost_scaling_rs::problem_generators::netgen::{NetgenParams, generate, write_dimacs};
 
 const SEED: i64 = 13_502_460;
 

@@ -13,11 +13,9 @@
 #![cfg_attr(not(test), deny(clippy::panic_in_result_fn))]
 
 #[doc(hidden)]
-pub mod goto;
-#[doc(hidden)]
-pub mod netgen;
-#[doc(hidden)]
 pub mod parser;
+#[doc(hidden)]
+pub mod problem_generators;
 
 pub use parser::ParseError;
 

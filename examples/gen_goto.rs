@@ -5,7 +5,7 @@
 //! Generates problems at several sizes into `OUTPUT_DIR` (default: target/benchdata/).
 //! Each file is named `goto_{nodes}n_{arcs}a.min`.
 
-use cost_scaling_rs::goto::{GotoParams, generate_to_string};
+use cost_scaling_rs::problem_generators::goto::{GotoParams, generate_to_string};
 use std::path::PathBuf;
 use std::{env, fs};
 

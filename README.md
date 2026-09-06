@@ -196,8 +196,11 @@ cargo run --release --example bench_compare -- --warmup 5 --min-runs 50
 src/
   lib.rs      - McmfCs2 solver implementation
   parser.rs   - DIMACS .min format parser
-  goto.rs     - GOTO (Grid On Torus) test problem generator
   main.rs     - CLI entry point
+  problem_generators/
+    mod.rs    - Graph problem generator module
+    goto/     - GOTO (Grid On Torus) test problem generator
+    netgen/   - NETGEN assignment, transportation, and network flow generator
 cs2/          - Reference C implementation (Goldberg, IG Systems)
 testdata/     - Static DIMACS test inputs
 tests/        - Integration tests (Rust vs. C comparison)
