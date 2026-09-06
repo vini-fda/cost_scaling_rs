@@ -40,28 +40,35 @@ fn netgen_source(instance: &netgen::NetgenInstance) -> String {
 
 #[test]
 fn diagrams_use_the_exact_sample_theme_and_fletcher_defaults() {
-    let sample = include_str!("../diagrams/sample.typ").replace("\r\n", "\n");
+    let sample = include_str!("../diagrams/sample.typ");
     let instance = netgen::generate(13_502_460, netgen_params()).expect("NETGEN");
-    let source = netgen_source(&instance).replace("\r\n", "\n");
-    // Exercise Windows checkouts and independently configured file endings
-    // even when this test runs on a host that checks out both files with LF.
-    for (sample_eol, source_eol) in [
-        ("\n", "\n"),
-        ("\r\n", "\r\n"),
-        ("\n", "\r\n"),
-        ("\r\n", "\n"),
-    ] {
-        assert_sample_theme_and_fletcher_defaults(
-            &sample.replace('\n', sample_eol),
-            &source.replace('\n', source_eol),
-        );
+    let source = netgen_source(&instance);
+    assert_sample_theme_and_fletcher_defaults(sample, &source);
+
+    #[cfg(windows)]
+    {
+        // Exercise Windows checkouts with all combinations of LF and CRLF.
+        let sample = sample.replace("\r\n", "\n");
+        let source = source.replace("\r\n", "\n");
+        for (sample_eol, source_eol) in [
+            ("\n", "\n"),
+            ("\r\n", "\r\n"),
+            ("\n", "\r\n"),
+            ("\r\n", "\n"),
+        ] {
+            assert_sample_theme_and_fletcher_defaults(
+                &sample.replace('\n', sample_eol),
+                &source.replace('\n', source_eol),
+            );
+        }
     }
 }
 
 fn assert_sample_theme_and_fletcher_defaults(sample: &str, source: &str) {
-    // Embedded Typst files retain Git checkout line endings. Compare the
-    // exact theme content without depending on the checkout's LF/CRLF choice.
+    // Embedded Typst files retain Git's CRLF checkout line endings on Windows.
+    #[cfg(windows)]
     let sample = sample.replace("\r\n", "\n");
+    #[cfg(windows)]
     let source = source.replace("\r\n", "\n");
     let theme_start = sample.find("#let theme =").expect("sample theme");
     let theme_end = sample.find("#let colred").expect("end of sample theme");
