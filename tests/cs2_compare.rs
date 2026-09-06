@@ -683,12 +683,12 @@ a 2 3 0 10 100000
 #[test]
 fn edge_infeasible_insufficient_capacity() {
     let mut solver = McmfCs2::new(3, 2);
-    solver.set_arc(1, 2, 0, 5, 1).expect("set_arc");
-    solver.set_arc(2, 3, 0, 5, 1).expect("set_arc");
     solver.set_supply_demand_of_node(1, 10).expect("set_supply");
     solver
         .set_supply_demand_of_node(3, -10)
         .expect("set_supply");
+    solver.set_arc(1, 2, 0, 5, 1).expect("set_arc");
+    solver.set_arc(2, 3, 0, 5, 1).expect("set_arc");
     assert!(solver.min_cost().is_err());
 }
 
@@ -696,10 +696,10 @@ fn edge_infeasible_insufficient_capacity() {
 #[test]
 fn edge_infeasible_disconnected() {
     let mut solver = McmfCs2::new(4, 2);
-    solver.set_arc(1, 2, 0, 10, 1).expect("set_arc");
-    solver.set_arc(3, 4, 0, 10, 1).expect("set_arc");
     solver.set_supply_demand_of_node(1, 5).expect("set_supply");
     solver.set_supply_demand_of_node(4, -5).expect("set_supply");
+    solver.set_arc(1, 2, 0, 10, 1).expect("set_arc");
+    solver.set_arc(3, 4, 0, 10, 1).expect("set_arc");
     assert!(solver.min_cost().is_err());
 }
 
@@ -746,5 +746,11 @@ n 2 -5
 a 1 2 0 10 1
 a 1 1 0 10 0
 ";
-    compare("self_loop", input);
+    // Every flow in 0..=10 on the zero-cost self-loop is optimal. Skipping
+    // self-loops during relabel changes this tie-breaking, not the solution cost.
+    for result in [run_rust(input), run_c(input)] {
+        assert!((result.cost - 5.0).abs() < 0.5);
+        assert_eq!(result.flows.get(&(1, 2)), Some(&5));
+        assert!((0..=10).contains(&result.flows.get(&(1, 1)).copied().unwrap_or(0)));
+    }
 }

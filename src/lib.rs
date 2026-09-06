@@ -151,6 +151,24 @@ pub enum Cs2Error {
     Infeasible,
     /// Price values overflowed numerical limits.
     PriceOverflow,
+    /// A supply, demand, or intermediate excess cannot be represented in `i64`.
+    ExcessOverflow,
+    /// Graph dimensions are negative or exceed the addressable array sizes.
+    InvalidProblemSize,
+    /// A parsed node identifier cannot be represented as an unsigned index.
+    InvalidNodeId {
+        /// The identifier from the input.
+        id: i64,
+    },
+    /// The number of inserted arcs differs from the declared number.
+    ArcCountMismatch {
+        /// Number of arcs declared at construction.
+        expected: usize,
+        /// Number of arcs supplied (including a rejected excess insertion).
+        actual: usize,
+    },
+    /// The solver has already started solving, or supplies were set after arcs.
+    InvalidBuildState,
     /// A supplied node id is outside the `1..=n` range fixed by
     /// [`McmfCs2::new`].
     NodeIdOutOfBounds {
@@ -184,8 +202,8 @@ pub enum Cs2Error {
         /// Total demand (negated sum of negative node excesses).
         demand: Excess,
     },
-    /// Node ids must start at 0 or 1; pre-processing found a smaller
-    /// minimum that the solver cannot internally remap.
+    /// Legacy error retained for compatibility. The solver now preserves the
+    /// declared `1..=n` node domain and no longer returns this variant.
     NodeIdsMustStartAtZeroOrOne {
         /// The minimum node id observed.
         min: usize,
@@ -197,6 +215,15 @@ impl std::fmt::Display for Cs2Error {
         match *self {
             Cs2Error::Infeasible => write!(f, "problem is infeasible"),
             Cs2Error::PriceOverflow => write!(f, "price values overflowed"),
+            Cs2Error::ExcessOverflow => write!(f, "supply, demand, or excess overflowed"),
+            Cs2Error::InvalidProblemSize => write!(f, "invalid or unaddressable graph dimensions"),
+            Cs2Error::InvalidNodeId { id } => write!(f, "invalid node identifier {id}"),
+            Cs2Error::ArcCountMismatch { expected, actual } => {
+                write!(f, "expected {expected} arcs, received {actual}")
+            }
+            Cs2Error::InvalidBuildState => {
+                write!(f, "solver is no longer in the required build phase")
+            }
             Cs2Error::NodeIdOutOfBounds { id, max } => {
                 write!(f, "node id {id} out of bounds (max {max})")
             }
@@ -324,6 +351,8 @@ pub struct McmfCs2 {
     n: usize,
     /// Number of arcs.
     m: usize,
+    /// True once preprocessing starts; builder arrays cannot be reused afterward.
+    started: bool,
 
     /// Check feasibility/optimality during `min_cost`. Note that this adds high overhead. False by default.
     check_solution: bool,
@@ -415,8 +444,6 @@ pub struct McmfCs2 {
     no_zero_cycles: bool,
     /// Print the answer?
     print_ans: bool,
-    /// Per-node supply/demand balance.
-    node_balance: Vec<i64>,
 
     // -- sketch variables used during reading in arcs --
     /// Minimal node id.
@@ -450,6 +477,27 @@ pub struct McmfCs2 {
 /// Returns the 1-based external id for a node index, or -1 if `NONE`.
 fn n_node(i: NodeIndex, node_min: usize) -> i64 {
     if i == NONE { -1 } else { (i + node_min) as i64 }
+}
+
+/// Keep all arena lengths and pointer offsets addressable before allocating.
+fn valid_dimensions(n: usize, m: usize) -> bool {
+    n <= (isize::MAX as usize / size_of::<Node>()).saturating_sub(4)
+        && m <= (isize::MAX as usize / size_of::<Arc>()).saturating_sub(1) / 2
+}
+
+/// Checked reduced-cost arithmetic; unsupported intermediates are errors, not wrapping costs.
+#[inline]
+fn reduced_cost(tail: Price, cost: Price, head: Price) -> Result<Price, Cs2Error> {
+    tail.checked_add(cost)
+        .and_then(|value| value.checked_sub(head))
+        .ok_or(Cs2Error::PriceOverflow)
+}
+
+/// Match C's post-increment comparison, including resetting the counter on a trigger.
+fn price_in_due(counter: &mut i32, interval: i32) -> bool {
+    let due = *counter > interval;
+    *counter = if due { 0 } else { *counter + 1 };
+    due
 }
 
 // ---------------------------------------------------------------------------
@@ -496,17 +544,30 @@ impl TryFrom<parser::DimacsMin> for McmfCs2 {
     type Error = Cs2Error;
 
     fn try_from(problem: parser::DimacsMin) -> Result<Self, Self::Error> {
-        let mut solver = McmfCs2::new(problem.nodes as usize, problem.arcs_count as usize);
+        let n = usize::try_from(problem.nodes).map_err(|_| Cs2Error::InvalidProblemSize)?;
+        let m = usize::try_from(problem.arcs_count).map_err(|_| Cs2Error::InvalidProblemSize)?;
+        if !valid_dimensions(n, m) {
+            return Err(Cs2Error::InvalidProblemSize);
+        }
+        if problem.arcs.len() != m {
+            return Err(Cs2Error::ArcCountMismatch {
+                expected: m,
+                actual: problem.arcs.len(),
+            });
+        }
+        let mut solver = McmfCs2::new(n, m);
         // Node supply/demand must be set before arcs, because set_arc adjusts
         // excess for nonzero lower bounds (excess -= low for tail, excess += low
         // for head). Setting nodes after arcs would overwrite those adjustments.
         for node in &problem.node_descs {
-            solver.set_supply_demand_of_node(node.id as usize, node.supply)?;
+            let id =
+                usize::try_from(node.id).map_err(|_| Cs2Error::InvalidNodeId { id: node.id })?;
+            solver.set_supply_demand_of_node(id, node.supply)?;
         }
         for arc in &problem.arcs {
             solver.set_arc(
-                arc.from as usize,
-                arc.to as usize,
+                usize::try_from(arc.from).map_err(|_| Cs2Error::InvalidNodeId { id: arc.from })?,
+                usize::try_from(arc.to).map_err(|_| Cs2Error::InvalidNodeId { id: arc.to })?,
                 arc.min_cap,
                 arc.max_cap,
                 arc.cost,
@@ -521,12 +582,20 @@ impl TryFrom<parser::DimacsMin> for McmfCs2 {
 // ---------------------------------------------------------------------------
 
 impl McmfCs2 {
-    /// Create a new solver for a network with `num_nodes` nodes and `num_arcs` arcs.
+    /// Create a solver with node IDs `1..=num_nodes` and exactly `num_arcs` arcs.
+    ///
+    /// # Panics
+    /// Panics if the dimensions exceed addressable array sizes.
     #[must_use]
     pub fn new(num_nodes: usize, num_arcs: usize) -> Self {
+        assert!(
+            valid_dimensions(num_nodes, num_arcs),
+            "unaddressable graph dimensions"
+        );
         let mut solver = McmfCs2 {
             n: num_nodes,
             m: num_arcs,
+            started: false,
 
             check_solution: false,
             comp_duals: false,
@@ -582,7 +651,6 @@ impl McmfCs2 {
 
             no_zero_cycles: false,
             print_ans: true,
-            node_balance: Vec::new(),
 
             node_min: 0,
             node_max: 0,
@@ -651,15 +719,33 @@ impl McmfCs2 {
     /// # Safety
     /// Caller must pass valid node/arc pointers (i.e., into the live arenas).
     #[inline(always)]
-    unsafe fn increase_flow(&mut self, i: *mut Node, j: *mut Node, a: *mut Arc, df: i64) {
+    unsafe fn increase_flow(
+        &mut self,
+        i: *mut Node,
+        j: *mut Node,
+        a: *mut Arc,
+        df: i64,
+    ) -> Result<(), Cs2Error> {
         // SAFETY: upheld by this function's safety contract: `i`, `j`, `a`,
         // and `(*a).sister` all point into the live node/arc arenas.
         unsafe {
-            (*i).excess -= df;
-            (*j).excess += df;
+            // A self-loop changes residual capacities, but not node excess.
+            if i != j {
+                let tail = (*i)
+                    .excess
+                    .checked_sub(df)
+                    .ok_or(Cs2Error::ExcessOverflow)?;
+                let head = (*j)
+                    .excess
+                    .checked_add(df)
+                    .ok_or(Cs2Error::ExcessOverflow)?;
+                (*i).excess = tail;
+                (*j).excess = head;
+            }
             (*a).res_capacity -= df;
             (*(*a).sister).res_capacity += df;
             self.n_push += 1;
+            Ok(())
         }
     }
 
@@ -956,8 +1042,9 @@ impl McmfCs2 {
 
         self.pos_current = 0;
         self.arc_current = 0;
-        self.node_max = 0;
-        self.node_min = self.n;
+        // The declared node domain includes isolated nodes.
+        self.node_max = self.n;
+        self.node_min = 1;
         self.max_cost = 0;
         self.total_p = 0;
         self.total_n = 0;
@@ -970,7 +1057,8 @@ impl McmfCs2 {
     /// Returns [`Cs2Error::ArcOutOfBounds`] if either endpoint is outside
     /// `1..=n`, or [`Cs2Error::InvalidCapacityBounds`] if `low_bound < 0`
     /// or `low_bound > up_bound` (after the negative-`up_bound` sentinel
-    /// is rewritten to `MAX_32`).
+    /// is rewritten to `MAX_32`). Also rejects excess arcs, solving already
+    /// started, and unrepresentable reverse costs or lower-bound adjustments.
     pub fn set_arc(
         &mut self,
         tail_node_id: usize,
@@ -979,7 +1067,17 @@ impl McmfCs2 {
         mut up_bound: i64,
         cost: Price,
     ) -> Result<(), Cs2Error> {
-        if tail_node_id > self.n || head_node_id > self.n {
+        if self.started {
+            return Err(Cs2Error::InvalidBuildState);
+        }
+        if self.arc_current / 2 == self.m {
+            return Err(Cs2Error::ArcCountMismatch {
+                expected: self.m,
+                actual: self.m + 1,
+            });
+        }
+        if tail_node_id == 0 || head_node_id == 0 || tail_node_id > self.n || head_node_id > self.n
+        {
             return Err(Cs2Error::ArcOutOfBounds {
                 tail: tail_node_id,
                 head: head_node_id,
@@ -995,6 +1093,20 @@ impl McmfCs2 {
                 low: low_bound,
                 up: up_bound,
             });
+        }
+
+        // Validate all fallible arithmetic before modifying the builder.
+        let reverse_cost = cost.checked_neg().ok_or(Cs2Error::PriceOverflow)?;
+        let abs_cost = cost.checked_abs().ok_or(Cs2Error::PriceOverflow)?;
+        let mut tail_excess = self.nodes[tail_node_id].excess;
+        let mut head_excess = self.nodes[head_node_id].excess;
+        if tail_node_id != head_node_id {
+            tail_excess = tail_excess
+                .checked_sub(low_bound)
+                .ok_or(Cs2Error::ExcessOverflow)?;
+            head_excess = head_excess
+                .checked_add(low_bound)
+                .ok_or(Cs2Error::ExcessOverflow)?;
         }
 
         self.arc_first[tail_node_id + 1] += 1;
@@ -1024,51 +1136,41 @@ impl McmfCs2 {
         self.arcs[ac].cost = cost;
         self.arcs[ac + 1].res_capacity = 0;
         self.cap[pc + 1] = 0;
-        self.arcs[ac + 1].cost = -cost;
+        self.arcs[ac + 1].cost = reverse_cost;
 
-        self.nodes[tail_node_id].excess -= low_bound;
-        self.nodes[head_node_id].excess += low_bound;
-
-        if head_node_id < self.node_min {
-            self.node_min = head_node_id;
-        }
-        if tail_node_id < self.node_min {
-            self.node_min = tail_node_id;
-        }
-        if head_node_id > self.node_max {
-            self.node_max = head_node_id;
-        }
-        if tail_node_id > self.node_max {
-            self.node_max = tail_node_id;
-        }
-
-        let abs_cost = cost.abs();
-        if abs_cost > self.max_cost && up_bound > 0 {
-            self.max_cost = abs_cost;
-        }
+        self.nodes[tail_node_id].excess = tail_excess;
+        self.nodes[head_node_id].excess = head_excess;
+        // Zero-capacity arcs are scaled too.
+        self.max_cost = self.max_cost.max(abs_cost);
 
         self.arc_current += 2;
         self.pos_current += 2;
         Ok(())
     }
 
-    /// Set the supply (positive) or demand (negative) of a node. Must be called before [`set_arc`](Self::set_arc).
+    /// Replace the supply (positive) or demand (negative) of a node.
+    /// Must be called before the first [`set_arc`](Self::set_arc).
     ///
     /// # Errors
     ///
-    /// Returns [`Cs2Error::NodeIdOutOfBounds`] if `id` exceeds the network's
-    /// node count (the `num_nodes` passed to [`Self::new`]).
+    /// Returns [`Cs2Error::NodeIdOutOfBounds`] if `id` is outside `1..=n`,
+    /// [`Cs2Error::InvalidBuildState`] after arcs or solving have started, or
+    /// [`Cs2Error::ExcessOverflow`] if the new aggregate totals exceed `i64`.
     pub fn set_supply_demand_of_node(&mut self, id: usize, excess: Excess) -> Result<(), Cs2Error> {
-        if id > self.n {
+        if self.started || self.arc_current != 0 {
+            return Err(Cs2Error::InvalidBuildState);
+        }
+        if id == 0 || id > self.n {
             return Err(Cs2Error::NodeIdOutOfBounds { id, max: self.n });
         }
+        let old = self.nodes[id].excess;
+        let total_p = i128::from(self.total_p) - i128::from(old.max(0)) + i128::from(excess.max(0));
+        let total_n = i128::from(self.total_n) + i128::from(old.min(0)) - i128::from(excess.min(0));
+        let total_p = i64::try_from(total_p).map_err(|_| Cs2Error::ExcessOverflow)?;
+        let total_n = i64::try_from(total_n).map_err(|_| Cs2Error::ExcessOverflow)?;
         self.nodes[id].excess = excess;
-        if excess > 0 {
-            self.total_p += excess;
-        }
-        if excess < 0 {
-            self.total_n -= excess;
-        }
+        self.total_p = total_p;
+        self.total_n = total_n;
         Ok(())
     }
 
@@ -1086,17 +1188,25 @@ impl McmfCs2 {
     /// # Errors
     ///
     /// - [`Cs2Error::Unbalanced`] if total supply != total demand.
-    /// - [`Cs2Error::NodeIdsMustStartAtZeroOrOne`] if the smallest node id
-    ///   seen by [`set_arc`](Self::set_arc) exceeds 1 (the internal
-    ///   zero-based remap shifts by `node_min`, which only works for
-    ///   `node_min <= 1`).
+    /// - [`Cs2Error::ArcCountMismatch`] if the builder is incomplete.
+    /// - [`Cs2Error::InvalidBuildState`] if solving has already started.
     fn pre_processing(&mut self) -> Result<(), Cs2Error> {
-        if (self.total_p - self.total_n).abs() != 0 {
+        if self.started {
+            return Err(Cs2Error::InvalidBuildState);
+        }
+        if self.arc_current / 2 != self.m {
+            return Err(Cs2Error::ArcCountMismatch {
+                expected: self.m,
+                actual: self.arc_current / 2,
+            });
+        }
+        if self.total_p != self.total_n {
             return Err(Cs2Error::Unbalanced {
                 supply: self.total_p,
                 demand: self.total_n,
             });
         }
+        self.started = true;
 
         // first arc from the first node.
         // SAFETY: arcs_base / nodes_base set in allocate_arrays.
@@ -1165,40 +1275,11 @@ impl McmfCs2 {
             }
         }
 
-        // overflow test (computed but not enforced, matching C++)
-        for ndp in self.node_min..=self.node_max {
-            let mut _cap_in: Excess = self.nodes[ndp].excess;
-            let mut _cap_out: Excess = -self.nodes[ndp].excess;
-            // SAFETY: allocate_arrays stored `node.first` as a pointer into
-            // the same allocation as `arcs_base`.
-            let a_start = unsafe { self.nodes[ndp].first.offset_from(self.arcs_base) as usize };
-            // SAFETY: same allocation invariant as `a_start`; the trailing
-            // sentinel at `self.nodes[node_max + 1]` keeps `ndp + 1` in-bounds.
-            let a_end = unsafe { self.nodes[ndp + 1].first.offset_from(self.arcs_base) as usize };
-            for ac in a_start..a_end {
-                if self.cap[ac] > 0 {
-                    _cap_out += self.cap[ac];
-                }
-                if self.cap[ac] == 0 {
-                    // SAFETY: every `.sister` pointer is an offset into
-                    // the live `arcs_base` arena.
-                    let sister_idx =
-                        unsafe { self.arcs[ac].sister.offset_from(self.arcs_base) as usize };
-                    _cap_in += self.cap[sister_idx];
-                }
-            }
-        }
-
-        if self.node_min > 1 {
-            return Err(Cs2Error::NodeIdsMustStartAtZeroOrOne { min: self.node_min });
-        }
-
         // adjustments: shift node base.
         // Vec::drain(0..node_min) shifts the remaining elements forward
         // in-place. The buffer base pointer (self.nodes_base) is unchanged,
         // but every head pointer stored in arcs is now off by `node_min`
         // node-slots — point them back to the correct (shifted) node.
-        self.n = self.node_max - self.node_min + 1;
         let node_min = self.node_min;
         if node_min > 0 {
             self.nodes.drain(0..node_min);
@@ -1232,8 +1313,24 @@ impl McmfCs2 {
     /// 3. **Allocates buckets** — creates the bucket vec used by
     ///    [`price_update`](Self::price_update) and
     ///    [`price_refine`](Self::price_refine), sized to `O(n * scale_factor)`.
-    fn cs2_initialize(&mut self) {
+    fn cs2_initialize(&mut self) -> Result<(), Cs2Error> {
         self.f_scale = SCALE_DEFAULT;
+        self.dn = i64::try_from(self.n + 1).map_err(|_| Cs2Error::PriceOverflow)?;
+        if self.no_zero_cycles {
+            self.dn = self.dn.checked_mul(2).ok_or(Cs2Error::PriceOverflow)?;
+        }
+        // Validate scaling before changing costs or saturating any arcs. max_cost
+        // includes every arc, and reverse costs have equal absolute magnitude.
+        self.mmc = self
+            .max_cost
+            .checked_mul(self.dn)
+            .ok_or(Cs2Error::PriceOverflow)?;
+        self.linf = usize::try_from(self.dn)
+            .ok()
+            .and_then(|dn| dn.checked_mul(SCALE_DEFAULT as usize))
+            .and_then(|buckets| buckets.checked_add(2))
+            .filter(|&buckets| buckets <= isize::MAX as usize / size_of::<Bucket>())
+            .ok_or(Cs2Error::InvalidProblemSize)?;
         // Base pointers were already set in allocate_arrays. pre_processing
         // may have drained `nodes` (in-place, no reallocation), so the base
         // address is unchanged.
@@ -1265,16 +1362,11 @@ impl McmfCs2 {
                         let df = (*a).res_capacity;
                         if df > 0 {
                             let j_ptr = (*a).head;
-                            self.increase_flow(i_ptr, j_ptr, a, df);
+                            self.increase_flow(i_ptr, j_ptr, a, df)?;
                         }
                     }
                     a = a.add(1);
                 }
-            }
-
-            self.dn = (self.n + 1) as Price;
-            if self.no_zero_cycles {
-                self.dn *= 2;
             }
 
             // Scale all arc costs by dn.
@@ -1295,13 +1387,6 @@ impl McmfCs2 {
                     a = a.add(1);
                 }
             }
-
-            if (self.max_cost as f64) * (self.dn as f64) > MAX_64 as f64 {
-                println!("Warning: Arc lengths too large, overflow possible");
-            }
-            self.mmc = self.max_cost * self.dn;
-
-            self.linf = (self.dn as f64 * self.f_scale.ceil() + 2.0) as usize;
 
             self.buckets = vec![Bucket::default(); self.linf];
             self.buckets_base = self.buckets.as_mut_ptr();
@@ -1342,6 +1427,7 @@ impl McmfCs2 {
             self.excq_first = std::ptr::null_mut();
             self.excq_last = std::ptr::null_mut();
         }
+        Ok(())
     }
 
     /// Scans node `i` during a price update, propagating distance labels
@@ -1350,13 +1436,13 @@ impl McmfCs2 {
     /// For each neighbor `j` reachable through a reverse arc with positive
     /// residual capacity, computes a candidate rank from the reduced cost
     /// `rc = p_j + c_ji - p_i`. If `rc < 0` the arc is admissible and `j`
-    /// inherits `i`'s rank; otherwise the rank increases by `ceil(rc / epsilon)`.
+    /// inherits `i`'s rank; otherwise the rank increases by `floor(rc / epsilon) + 1`.
     /// When a neighbor's rank improves, it is moved to a closer bucket in the
     /// Dijkstra-like scan order used by [`price_update`](Self::price_update).
     ///
     /// After processing all neighbors, node `i`'s price is decreased by
     /// `rank * epsilon` and its rank is set to −1 (settled).
-    fn up_node_scan(&mut self, i_ptr: *mut Node) {
+    fn up_node_scan(&mut self, i_ptr: *mut Node) -> Result<(), Cs2Error> {
         // SAFETY: only called via price_update -> refine -> cs2, after
         // cs2_initialize set base pointers; i_ptr is a live node.
         unsafe {
@@ -1374,7 +1460,7 @@ impl McmfCs2 {
                     let j_ptr = (*a).head;
                     let j_rank = (*j_ptr).rank;
                     if j_rank > i_rank {
-                        let rc = (*j_ptr).price + (*ra).cost - i_price;
+                        let rc = reduced_cost((*j_ptr).price, (*ra).cost, i_price)?;
                         let j_new_rank = if rc < 0 {
                             i_rank
                         } else {
@@ -1394,9 +1480,14 @@ impl McmfCs2 {
                 a = a.add(1);
             }
 
-            (*i_ptr).price -= i_rank * eps;
+            let dp = i_rank.checked_mul(eps).ok_or(Cs2Error::PriceOverflow)?;
+            (*i_ptr).price = (*i_ptr)
+                .price
+                .checked_sub(dp)
+                .ok_or(Cs2Error::PriceOverflow)?;
             (*i_ptr).rank = -1;
         }
+        Ok(())
     }
 
     /// Globally recomputes node prices using a Dijkstra-like bucket scan
@@ -1411,7 +1502,7 @@ impl McmfCs2 {
     /// Sets `flag_updt = Failed` if not all surplus nodes are reachable from
     /// deficit nodes, signaling potential infeasibility or a need to unsuspend
     /// arcs.
-    fn price_update(&mut self) {
+    fn price_update(&mut self) -> Result<(), Cs2Error> {
         // SAFETY: only called after cs2_initialize.
         unsafe {
             self.n_update += 1;
@@ -1430,15 +1521,15 @@ impl McmfCs2 {
             }
 
             let mut remain = self.total_excess;
-            if (remain as f64) < 0.5 {
-                return;
+            if remain == 0 {
+                return Ok(());
             }
 
             let mut b = 0usize;
             while b < self.l_bucket {
                 while self.nonempty_bucket(b) {
                     let i_ptr = self.get_from_bucket(b);
-                    self.up_node_scan(i_ptr);
+                    self.up_node_scan(i_ptr)?;
                     let i_exc = (*i_ptr).excess;
                     if i_exc > 0 {
                         remain -= i_exc;
@@ -1453,11 +1544,13 @@ impl McmfCs2 {
                 b += 1;
             }
 
-            if remain as f64 > 0.5 {
+            if remain > 0 {
                 self.flag_updt = UpdateFlag::Failed;
             }
 
-            let dp = (b as i64) * self.epsilon;
+            let dp = (b as i64)
+                .checked_mul(self.epsilon)
+                .ok_or(Cs2Error::PriceOverflow)?;
             let price_min = self.price_min;
 
             let mut p = self.nodes_base;
@@ -1468,12 +1561,13 @@ impl McmfCs2 {
                         self.remove_from_bucket(p, rank as usize);
                     }
                     if (*p).price > price_min {
-                        (*p).price -= dp;
+                        (*p).price = (*p).price.checked_sub(dp).ok_or(Cs2Error::PriceOverflow)?;
                     }
                 }
                 p = p.add(1);
             }
         }
+        Ok(())
     }
 
     /// Relabels node `i` by scanning its outgoing residual arcs for the best
@@ -1506,9 +1600,14 @@ impl McmfCs2 {
             // scan 1/2: from current+1 to end
             let mut a = current.add(1);
             while a < a_stop {
-                if (*a).res_capacity > 0 {
+                // Relabeling cannot change a self-loop's reduced cost. Negative
+                // self-loops were already saturated during initialization.
+                if (*a).res_capacity > 0 && (*a).head != i_ptr {
                     let head = (*a).head;
-                    let dp = (*head).price - (*a).cost;
+                    let dp = (*head)
+                        .price
+                        .checked_sub((*a).cost)
+                        .ok_or(Cs2Error::PriceOverflow)?;
                     if dp > p_max {
                         if i_price < dp {
                             (*i_ptr).current = a;
@@ -1523,12 +1622,17 @@ impl McmfCs2 {
 
             // scan 2/2: from first to current+1
             let a_start2 = (*i_ptr).first;
-            let a_stop2 = current.add(1);
+            // For an empty adjacency list current == a_stop. Do not inspect
+            // the next node's arc (or the trailing sentinel) as an outgoing arc.
+            let a_stop2 = current.add(1).min(a_stop);
             let mut a = a_start2;
             while a < a_stop2 {
-                if (*a).res_capacity > 0 {
+                if (*a).res_capacity > 0 && (*a).head != i_ptr {
                     let head = (*a).head;
-                    let dp = (*head).price - (*a).cost;
+                    let dp = (*head)
+                        .price
+                        .checked_sub((*a).cost)
+                        .ok_or(Cs2Error::PriceOverflow)?;
                     if dp > p_max {
                         if i_price < dp {
                             (*i_ptr).current = a;
@@ -1542,7 +1646,9 @@ impl McmfCs2 {
             }
 
             if p_max != self.price_min {
-                (*i_ptr).price = p_max - self.epsilon;
+                (*i_ptr).price = p_max
+                    .checked_sub(self.epsilon)
+                    .ok_or(Cs2Error::PriceOverflow)?;
                 (*i_ptr).current = a_max;
             } else if (*i_ptr).suspended == (*i_ptr).first {
                 if (*i_ptr).excess == 0 {
@@ -1565,11 +1671,9 @@ impl McmfCs2 {
     /// Applies push and relabel operations to active node `i` until it becomes
     /// inactive (Goldberg §1, Fig 4: *discharge*).
     ///
-    /// Implements the **push lookahead** heuristic (Goldberg §2.4): before
-    /// pushing to a node `j` with non-negative excess, checks whether `j` has
-    /// an outgoing admissible arc. If `j` had zero excess and becomes active
-    /// from the push, it is relabeled immediately to avoid the common scenario
-    /// where flow is pushed back to `i` on the next discharge of `j`.
+    /// When a push turns a deficit node into a positive-excess node, relabels
+    /// that destination before enqueuing it. Other destinations are enqueued
+    /// without an outgoing-arc lookahead.
     ///
     /// The loop alternates between pushing along the current arc and relabeling
     /// when the current arc is inadmissible, stopping when `i`'s excess drops
@@ -1583,10 +1687,14 @@ impl McmfCs2 {
             let mut j_ptr = (*a).head;
 
             // check admissible
-            let is_admissible =
-                (*a).res_capacity > 0 && (*i_ptr).price + (*a).cost < (*j_ptr).price;
+            let is_admissible = a < (*i_ptr.add(1)).suspended
+                && (*a).res_capacity > 0
+                && reduced_cost((*i_ptr).price, (*a).cost, (*j_ptr).price)? < 0;
             if !is_admissible {
                 self.relabel(i_ptr)?;
+                if self.flag_price != 0 {
+                    return Ok(());
+                }
                 a = (*i_ptr).current;
                 j_ptr = (*a).head;
             }
@@ -1598,13 +1706,13 @@ impl McmfCs2 {
                     if j_exc == 0 {
                         self.n_src += 1;
                     }
-                    self.increase_flow(i_ptr, j_ptr, a, df);
+                    self.increase_flow(i_ptr, j_ptr, a, df)?;
                     if self.out_of_excess_q(j_ptr) {
                         self.insert_to_excess_q(j_ptr);
                     }
                 } else {
                     let df = (*i_ptr).excess.min((*a).res_capacity);
-                    self.increase_flow(i_ptr, j_ptr, a, df);
+                    self.increase_flow(i_ptr, j_ptr, a, df)?;
                     let j_exc_after = (*j_ptr).excess;
                     if j_exc_after >= 0 {
                         if j_exc_after > 0 {
@@ -1627,6 +1735,9 @@ impl McmfCs2 {
                 }
 
                 self.relabel(i_ptr)?;
+                if self.flag_price != 0 {
+                    break;
+                }
                 a = (*i_ptr).current;
                 j_ptr = (*a).head;
             }
@@ -1649,7 +1760,7 @@ impl McmfCs2 {
     ///
     /// Returns the number of bad fix-ins found. If nonzero, the excess queue
     /// is rebuilt from scratch.
-    fn price_in(&mut self) -> i32 {
+    fn price_in(&mut self) -> Result<i32, Cs2Error> {
         // SAFETY: called only after cs2_initialize set base pointers.
         unsafe {
             let arcs_base = self.arcs_base;
@@ -1658,7 +1769,7 @@ impl McmfCs2 {
             let sentinel_node = self.sentinel_node;
 
             'restart: loop {
-                let cut_on_i = self.cut_on as i64;
+                let cut_on = self.cut_on;
                 let mut i_ptr = self.nodes_base;
                 while i_ptr < sentinel_node {
                     let initial_first = (*i_ptr).first;
@@ -1669,7 +1780,7 @@ impl McmfCs2 {
                     while a > suspended {
                         a = a.sub(1);
                         let j_ptr = (*a).head;
-                        let rc = i_price + (*a).cost - (*j_ptr).price;
+                        let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                         if rc < 0 && (*a).res_capacity > 0 {
                             if bad_found == 0 {
                                 bad_found = 1;
@@ -1677,7 +1788,7 @@ impl McmfCs2 {
                                 continue 'restart;
                             }
                             let df = (*a).res_capacity;
-                            self.increase_flow(i_ptr, j_ptr, a, df);
+                            self.increase_flow(i_ptr, j_ptr, a, df)?;
 
                             let reverse_arc = (*a).sister;
 
@@ -1695,7 +1806,7 @@ impl McmfCs2 {
                             }
 
                             n_in_bad += 1;
-                        } else if rc < cut_on_i && rc > -cut_on_i {
+                        } else if (rc as f64) < cut_on && (rc as f64) > -cut_on {
                             (*i_ptr).first = (*i_ptr).first.sub(1);
                             let b_idx = (*i_ptr).first.offset_from(arcs_base) as usize;
                             let a_idx = a.offset_from(arcs_base) as usize;
@@ -1719,7 +1830,10 @@ impl McmfCs2 {
                     (*i_ptr).current = (*i_ptr).first;
                     let i_exc = (*i_ptr).excess;
                     if i_exc > 0 {
-                        self.total_excess += i_exc;
+                        self.total_excess = self
+                            .total_excess
+                            .checked_add(i_exc)
+                            .ok_or(Cs2Error::ExcessOverflow)?;
                         self.n_src += 1;
                         self.insert_to_excess_q(i_ptr);
                     }
@@ -1736,7 +1850,7 @@ impl McmfCs2 {
                 self.time_for_price_in = TIME_FOR_PRICE_IN2;
             }
 
-            n_in_bad
+            Ok(n_in_bad)
         }
     }
 
@@ -1770,7 +1884,10 @@ impl McmfCs2 {
                 (*p).current = (*p).first;
                 let i_exc = (*p).excess;
                 if i_exc > 0 {
-                    self.total_excess += i_exc;
+                    self.total_excess = self
+                        .total_excess
+                        .checked_add(i_exc)
+                        .ok_or(Cs2Error::ExcessOverflow)?;
                     self.n_src += 1;
                     self.insert_to_excess_q(p);
                 }
@@ -1785,7 +1902,7 @@ impl McmfCs2 {
                 if self.empty_excess_q() {
                     if self.n_ref > PRICE_OUT_START {
                         pr_in_int = 0;
-                        self.price_in();
+                        self.price_in()?;
                     }
                     if self.empty_excess_q() {
                         break;
@@ -1804,11 +1921,11 @@ impl McmfCs2 {
 
                         if self.flag_price != 0 && self.n_ref > PRICE_OUT_START {
                             pr_in_int = 0;
-                            self.price_in();
+                            self.price_in()?;
                             self.flag_price = 0;
                         }
 
-                        self.price_update();
+                        self.price_update()?;
 
                         while self.flag_updt != UpdateFlag::Ok {
                             if self.n_ref == 1 {
@@ -1818,17 +1935,15 @@ impl McmfCs2 {
                             self.update_cut_off();
                             self.n_bad_relabel += 1;
                             pr_in_int = 0;
-                            self.price_in();
-                            self.price_update();
+                            self.price_in()?;
+                            self.price_update()?;
                         }
                         self.n_rel = 0;
 
-                        if self.n_ref > PRICE_OUT_START {
-                            pr_in_int += 1;
-                            if pr_in_int > self.time_for_price_in {
-                                pr_in_int = 0;
-                                self.price_in();
-                            }
+                        if self.n_ref > PRICE_OUT_START
+                            && price_in_due(&mut pr_in_int, self.time_for_price_in)
+                        {
+                            self.price_in()?;
                         }
                     }
                 }
@@ -1850,7 +1965,7 @@ impl McmfCs2 {
     ///
     /// Returns `true` if epsilon-optimal prices were found, `false` if an
     /// admissible cycle was detected (requiring a subsequent [`refine`](Self::refine)).
-    fn price_refine(&mut self) -> bool {
+    fn price_refine(&mut self) -> Result<bool, Cs2Error> {
         // SAFETY: called from cs2 after cs2_initialize.
         unsafe {
             self.n_prefine += 1;
@@ -1898,7 +2013,7 @@ impl McmfCs2 {
                         while a < a_stop {
                             if (*a).res_capacity > 0 {
                                 let j_ptr = (*a).head;
-                                let rc = i_price + (*a).cost - (*j_ptr).price;
+                                let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                                 if rc < 0 {
                                     let j_inp = (*j_ptr).inp;
                                     if j_inp == Color::White {
@@ -1918,7 +2033,7 @@ impl McmfCs2 {
                                         // find min capacity on cycle
                                         let mut is = i_ptr;
                                         let mut ir = i_ptr;
-                                        let mut df: i64 = MAX_32;
+                                        let mut df: i64 = i64::MAX;
                                         loop {
                                             let ar = (*ir).current;
                                             let ar_cap = (*ar).res_capacity;
@@ -1937,7 +2052,7 @@ impl McmfCs2 {
                                         loop {
                                             let ar = (*ir).current;
                                             let head = (*ar).head;
-                                            self.increase_flow(ir, head, ar, df);
+                                            self.increase_flow(ir, head, ar, df)?;
                                             if ir == j_ptr {
                                                 break;
                                             }
@@ -1999,10 +2114,11 @@ impl McmfCs2 {
                     while a < a_stop {
                         if (*a).res_capacity > 0 {
                             let j_ptr = (*a).head;
-                            let rc = i_price + (*a).cost - (*j_ptr).price;
+                            let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                             if rc < 0 {
-                                let dr = (-rc as f64 - 0.5) / eps as f64;
-                                let j_rank = dr as i64 + i_rank;
+                                // Exact floor((|rc| - 1) / eps), including rc == i64::MIN.
+                                let dr = ((rc.unsigned_abs() - 1) / eps as u64) as i64;
+                                let j_rank = dr.saturating_add(i_rank);
                                 if j_rank < linf_i && j_rank > (*j_ptr).rank {
                                     (*j_ptr).rank = j_rank;
                                 }
@@ -2025,7 +2141,7 @@ impl McmfCs2 {
                 let mut b = bmax;
                 while b >= 1 {
                     let i_rank = b as i64;
-                    let dp = i_rank * eps;
+                    let dp = i_rank.checked_mul(eps).ok_or(Cs2Error::PriceOverflow)?;
 
                     while self.nonempty_bucket(b) {
                         let i_ptr = self.get_from_bucket(b);
@@ -2039,7 +2155,7 @@ impl McmfCs2 {
                                 let j_ptr = (*a).head;
                                 let j_rank = (*j_ptr).rank;
                                 if j_rank < i_rank {
-                                    let rc = i_price + (*a).cost - (*j_ptr).price;
+                                    let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                                     let j_new_rank = if rc < 0 {
                                         i_rank
                                     } else {
@@ -2055,7 +2171,7 @@ impl McmfCs2 {
                                             self.insert_to_bucket(j_ptr, j_new_rank as usize);
                                         } else {
                                             let df = (*a).res_capacity;
-                                            self.increase_flow(i_ptr, j_ptr, a, df);
+                                            self.increase_flow(i_ptr, j_ptr, a, df)?;
                                         }
                                     }
                                 }
@@ -2063,7 +2179,10 @@ impl McmfCs2 {
                             a = a.add(1);
                         }
 
-                        (*i_ptr).price -= dp;
+                        (*i_ptr).price = (*i_ptr)
+                            .price
+                            .checked_sub(dp)
+                            .ok_or(Cs2Error::PriceOverflow)?;
                     }
                     b -= 1;
                 }
@@ -2082,11 +2201,11 @@ impl McmfCs2 {
                     let a_stop = (*p.add(1)).suspended;
                     while a < a_stop {
                         let j_ptr = (*a).head;
-                        let rc = i_price + (*a).cost - (*j_ptr).price;
+                        let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                         if rc < -eps {
                             let df = (*a).res_capacity;
                             if df > 0 {
-                                self.increase_flow(p, j_ptr, a, df);
+                                self.increase_flow(p, j_ptr, a, df)?;
                             }
                         }
                         a = a.add(1);
@@ -2095,7 +2214,7 @@ impl McmfCs2 {
                 }
             }
 
-            eps_optimal
+            Ok(eps_optimal)
         }
     }
 
@@ -2107,7 +2226,7 @@ impl McmfCs2 {
     /// graph, computes longest-path distances via a reverse-topological bucket
     /// scan, and adjusts prices accordingly. Aborts early if a negative-cost
     /// residual cycle is detected (should not happen for a correct solution).
-    fn compute_prices(&mut self) {
+    fn compute_prices(&mut self) -> Result<(), Cs2Error> {
         // SAFETY: called after cs2_initialize.
         unsafe {
             self.n_prefine += 1;
@@ -2147,7 +2266,7 @@ impl McmfCs2 {
                         while a < a_stop {
                             if (*a).res_capacity > 0 {
                                 let j_ptr = (*a).head;
-                                let rc = i_price + (*a).cost - (*j_ptr).price;
+                                let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                                 if rc < 0 {
                                     let j_inp = (*j_ptr).inp;
                                     if j_inp == Color::White {
@@ -2197,12 +2316,11 @@ impl McmfCs2 {
                     while a < a_stop {
                         if (*a).res_capacity > 0 {
                             let j_ptr = (*a).head;
-                            let rc = i_price + (*a).cost - (*j_ptr).price;
+                            let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                             if rc < 0 {
-                                let dr = -rc;
-                                let j_rank = dr + i_rank;
-                                if j_rank < linf_i && j_rank > (*j_ptr).rank {
-                                    (*j_ptr).rank = j_rank;
+                                let j_rank = rc.unsigned_abs().saturating_add(i_rank as u64);
+                                if j_rank < linf_i as u64 && j_rank > (*j_ptr).rank as u64 {
+                                    (*j_ptr).rank = j_rank as i64;
                                 }
                             }
                         }
@@ -2237,7 +2355,7 @@ impl McmfCs2 {
                                 let j_ptr = (*a).head;
                                 let j_rank = (*j_ptr).rank;
                                 if j_rank < i_rank {
-                                    let rc = i_price + (*a).cost - (*j_ptr).price;
+                                    let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)?;
                                     let j_new_rank = if rc < 0 {
                                         i_rank
                                     } else {
@@ -2256,7 +2374,10 @@ impl McmfCs2 {
                             a = a.add(1);
                         }
 
-                        (*i_ptr).price -= dp;
+                        (*i_ptr).price = (*i_ptr)
+                            .price
+                            .checked_sub(dp)
+                            .ok_or(Cs2Error::PriceOverflow)?;
                     }
                     b -= 1;
                 }
@@ -2266,6 +2387,7 @@ impl McmfCs2 {
                 }
             }
         }
+        Ok(())
     }
 
     /// Suspends arcs whose reduced cost exceeds the `cut_off` threshold
@@ -2276,7 +2398,7 @@ impl McmfCs2 {
     /// further. Suspended arcs are moved before `first` in the adjacency list
     /// via [`exchange`](Self::exchange), so they are skipped by relabel and
     /// discharge. They can later be recovered by [`price_in`](Self::price_in).
-    fn price_out(&mut self) {
+    fn price_out(&mut self) -> Result<(), Cs2Error> {
         // SAFETY: called from cs2 after cs2_initialize.
         unsafe {
             let arcs_base = self.arcs_base;
@@ -2291,7 +2413,7 @@ impl McmfCs2 {
                 let mut a = (*i_ptr).first;
                 while a < a_stop {
                     let j_ptr = (*a).head;
-                    let rc = (i_price + (*a).cost - (*j_ptr).price) as f64;
+                    let rc = reduced_cost(i_price, (*a).cost, (*j_ptr).price)? as f64;
                     let sister = (*a).sister;
                     if (rc > cut_off && (*sister).res_capacity <= 0)
                         || (rc < n_cut_off && (*a).res_capacity <= 0)
@@ -2307,6 +2429,7 @@ impl McmfCs2 {
                 i_ptr = i_ptr.add(1);
             }
         }
+        Ok(())
     }
 
     /// Reduce epsilon by the scale factor for the next scaling iteration.
@@ -2317,15 +2440,25 @@ impl McmfCs2 {
         if self.epsilon <= 1 {
             return true;
         }
-        self.epsilon = (self.epsilon as f64 / self.f_scale).ceil() as Price;
+        // f_scale is the fixed integer SCALE_DEFAULT. Avoid losing integer
+        // precision above 2^53 when taking the ceiling.
+        let scale = SCALE_DEFAULT as i64;
+        self.epsilon = self.epsilon / scale + i64::from(self.epsilon % scale != 0);
         self.cut_off = self.cut_off_factor * self.epsilon as f64;
         self.cut_on = self.cut_off * CUT_OFF_GAP;
         false
     }
 
-    /// Checks the feasibility of the proposed problem.
-    fn is_feasible(&mut self) -> bool {
-        let mut ans = true;
+    /// Check pre-initialization transformed balances against flow above each lower bound.
+    ///
+    /// - `initial_balances`: Per-node supply/demand balance.
+    fn is_feasible(&self, initial_balances: &[Excess]) -> bool {
+        debug_assert_eq!(initial_balances.len(), self.n);
+        // Wider scratch sums avoid overflow due only to the order of checking
+        // incident arcs.
+        // We do not mutate the saved balances so that checking is repeatable.
+        // Current node excesses are not a substitute: solving has changed them.
+        let mut balance: Vec<i128> = initial_balances.iter().copied().map(i128::from).collect();
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
@@ -2337,26 +2470,26 @@ impl McmfCs2 {
             let a_stop = unsafe { self.nodes[i + 1].suspended.offset_from(arcs_base) as usize };
             for a in a_start..a_stop {
                 if self.cap[a] > 0 {
-                    let fa = self.cap[a] - self.arcs[a].res_capacity;
-                    if fa < 0 {
-                        ans = false;
-                        break;
+                    let full_flow = self.cap[a] - self.arcs[a].res_capacity;
+                    // SAFETY: complete construction and arc exchanges preserve
+                    // sister pointers into the live arc arena.
+                    let above_lower = unsafe { (*self.arcs[a].sister).res_capacity };
+                    if full_flow < 0
+                        || full_flow > self.cap[a]
+                        || above_lower < 0
+                        || above_lower > full_flow
+                    {
+                        return false;
                     }
-                    self.node_balance[i] -= fa;
+                    balance[i] -= i128::from(above_lower);
                     // SAFETY: cs2_initialize stored `arc.head` as a pointer
                     // into the same allocation as `nodes_base`.
                     let head_idx = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
-                    self.node_balance[head_idx] += fa;
+                    balance[head_idx] += i128::from(above_lower);
                 }
             }
         }
-        for i in 0..self.n {
-            if self.node_balance[i] != 0 {
-                ans = false;
-                break;
-            }
-        }
-        ans
+        balance.iter().all(|&excess| excess == 0)
     }
 
     /// Checks complimentary slackness.
@@ -2378,7 +2511,8 @@ impl McmfCs2 {
                     // SAFETY: cs2_initialize stored `arc.head` as a pointer
                     // into the same allocation as `nodes_base`.
                     let j = unsafe { self.arcs[a].head.offset_from(nodes_base) as usize };
-                    let rc = self.nodes[i].price + self.arcs[a].cost - self.nodes[j].price;
+                    let rc = i128::from(self.nodes[i].price) + i128::from(self.arcs[a].cost)
+                        - i128::from(self.nodes[j].price);
                     if rc < 0 {
                         return false;
                     }
@@ -2391,12 +2525,12 @@ impl McmfCs2 {
     /// Prints the solution.
     ///
     /// `comp_duals`: whether to compute the prices.
-    fn print_solution(&self, comp_duals: bool) {
+    fn print_solution(&self, objective_cost: f64, comp_duals: bool) {
         if !self.print_ans {
             return;
         }
         println!("c");
-        println!("s 0"); // cost printed separately
+        println!("s {objective_cost:.0}");
 
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
@@ -2424,7 +2558,7 @@ impl McmfCs2 {
         }
 
         if comp_duals {
-            let mut min_price = MAX_32;
+            let mut min_price = i64::MAX;
             for i in 0..self.n {
                 min_price = min_price.min(self.nodes[i].price);
             }
@@ -2432,7 +2566,7 @@ impl McmfCs2 {
                 println!(
                     "p {:7} {:7}",
                     n_node(i, self.node_min),
-                    self.nodes[i].price - min_price
+                    i128::from(self.nodes[i].price) - i128::from(min_price)
                 );
             }
         }
@@ -2476,7 +2610,7 @@ impl McmfCs2 {
     /// multiplied by `dn` for integer epsilon arithmetic. This method divides
     /// them back, computes `sum(cost * flow)` over forward arcs, and divides
     /// node prices by `dn`.
-    fn finishup(&mut self, objective_cost: &mut f64, comp_duals: bool) {
+    fn finishup(&mut self, objective_cost: &mut f64, comp_duals: bool) -> Result<(), Cs2Error> {
         // remove zero-cost cycle markers
         if self.no_zero_cycles {
             // SAFETY: arcs_base valid post-cs2_initialize.
@@ -2512,10 +2646,11 @@ impl McmfCs2 {
         }
 
         if comp_duals {
-            self.compute_prices();
+            self.compute_prices()?;
         }
 
         *objective_cost = obj_internal;
+        Ok(())
     }
 
     /// Main loop of the successive approximation algorithm
@@ -2545,7 +2680,7 @@ impl McmfCs2 {
             self.refine()?;
 
             if self.n_ref >= PRICE_OUT_START {
-                self.price_out();
+                self.price_out()?;
             }
 
             if self.update_epsilon() {
@@ -2554,12 +2689,12 @@ impl McmfCs2 {
 
             loop {
                 // need to refine further
-                if !self.price_refine() {
+                if !self.price_refine()? {
                     break;
                 }
 
                 if self.n_ref >= PRICE_OUT_START {
-                    if self.price_in() != 0 {
+                    if self.price_in()? != 0 {
                         break;
                     }
                     scaling_done = self.update_epsilon();
@@ -2574,7 +2709,7 @@ impl McmfCs2 {
             }
         }
 
-        self.finishup(objective_cost, comp_duals);
+        self.finishup(objective_cost, comp_duals)?;
         Ok(())
     }
 
@@ -2586,6 +2721,8 @@ impl McmfCs2 {
     /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
     /// circulation, or any other [`Cs2Error`] variant produced by the
     /// preprocessing / cost-scaling phases.
+    /// This method may be called only once after successful preprocessing;
+    /// subsequent calls return [`Cs2Error::InvalidBuildState`].
     pub fn run_cs2(&mut self) -> Result<(), Cs2Error> {
         // ordering
         self.pre_processing()?;
@@ -2593,17 +2730,18 @@ impl McmfCs2 {
         let check_solution = self.check_solution;
         let comp_duals = self.comp_duals;
 
-        // check solution setup
-        if check_solution {
-            self.node_balance = vec![0i64; self.n + 1];
-            for i in 0..self.n {
-                self.node_balance[i] = self.nodes[i].excess;
-            }
-        }
+        // Save transformed supplies before initialization or pushes change excess.
+        // The snapshot is local to this solve, and is not allocated when checking is off.
+        let initial_balances = check_solution.then(|| {
+            self.nodes[..self.n]
+                .iter()
+                .map(|node| node.excess)
+                .collect::<Vec<_>>()
+        });
 
         // double the arc count (forward + backward)
         self.m *= 2;
-        self.cs2_initialize();
+        self.cs2_initialize()?;
         self.print_graph();
 
         println!("\nc CS 4.3");
@@ -2639,24 +2777,26 @@ impl McmfCs2 {
             self.n_prscan1, self.n_bad_pricein, self.n_bad_relabel
         );
 
-        if check_solution {
+        if let Some(initial_balances) = initial_balances {
             println!("c checking feasibility...");
-            if self.is_feasible() {
+            if self.is_feasible(&initial_balances) {
                 println!("c ...OK");
             } else {
                 println!("c ERROR: solution infeasible");
+                return Err(Cs2Error::Infeasible);
             }
             println!("c computing prices and checking CS...");
-            self.compute_prices();
+            self.compute_prices()?;
             if self.check_cs() {
                 println!("c ...OK");
             } else {
                 println!("ERROR: CS violation");
+                return Err(Cs2Error::Infeasible);
             }
         }
 
         if self.print_ans {
-            self.print_solution(comp_duals);
+            self.print_solution(objective_cost, comp_duals);
         }
         Ok(())
     }
@@ -2670,32 +2810,35 @@ impl McmfCs2 {
     /// Returns [`Cs2Error::Infeasible`] when the problem has no feasible
     /// circulation, or any other [`Cs2Error`] variant produced by the
     /// preprocessing / cost-scaling phases.
+    /// In particular, unsupported intermediate price/excess arithmetic returns
+    /// [`Cs2Error::PriceOverflow`] / [`Cs2Error::ExcessOverflow`] in all profiles.
     pub fn min_cost(mut self) -> Result<McmfSolution, Cs2Error> {
         // ordering
         self.pre_processing()?;
 
         let check_solution = self.check_solution;
 
-        // check solution setup
-        if check_solution {
-            self.node_balance = vec![0i64; self.n + 1];
-            for i in 0..self.n {
-                self.node_balance[i] = self.nodes[i].excess;
-            }
-        }
+        // Save transformed supplies before initialization or pushes change excess.
+        // The snapshot is local to this solve, and is not allocated when checking is off.
+        let initial_balances = check_solution.then(|| {
+            self.nodes[..self.n]
+                .iter()
+                .map(|node| node.excess)
+                .collect::<Vec<_>>()
+        });
 
         // double the arc count (forward + backward)
         self.m *= 2;
-        self.cs2_initialize();
+        self.cs2_initialize()?;
 
         let mut objective_cost = 0.0;
         self.cs2(&mut objective_cost)?;
 
-        if check_solution {
-            if !self.is_feasible() {
+        if let Some(initial_balances) = initial_balances {
+            if !self.is_feasible(&initial_balances) {
                 return Err(Cs2Error::Infeasible);
             }
-            self.compute_prices();
+            self.compute_prices()?;
             if !self.check_cs() {
                 return Err(Cs2Error::Infeasible);
             }
@@ -2710,7 +2853,8 @@ impl McmfCs2 {
 
 /// Result of a successful min-cost flow computation.
 pub struct McmfSolution {
-    /// Optimal objective cost.
+    /// Optimal objective cost, represented approximately as `f64`.
+    /// Integer objectives above `2^53` need not be exactly representable.
     pub objective_cost: f64,
     /// The solver's state after completion
     solver: McmfCs2,
@@ -2801,7 +2945,149 @@ impl McmfSolution {
 
 #[cfg(test)]
 mod tests {
-    use super::{CUT_OFF_GAP, CUT_OFF_MIN, McmfCs2};
+    use super::{CUT_OFF_GAP, CUT_OFF_MIN, Cs2Error, McmfCs2, price_in_due, reduced_cost};
+
+    fn initialize(solver: &mut McmfCs2) {
+        solver.pre_processing().expect("preprocessing");
+        solver.m *= 2;
+        solver.cs2_initialize().expect("initialization");
+    }
+
+    #[test]
+    fn price_in_preserves_fractional_and_integer_threshold_boundaries() {
+        for cut_on in [9.6, 10.0] {
+            for rc in [-10, -9, 0, 9, 10] {
+                let mut solver = McmfCs2::new(2, 1);
+                solver.set_arc(1, 2, 0, 1, 0).expect("arc");
+                initialize(&mut solver);
+                // Saturate the forward arc so a negative rc does not invoke
+                // mandatory bad-fix-in handling instead of the threshold test.
+                solver.arcs[0].res_capacity = 0;
+                solver.arcs[1].res_capacity = 1;
+                solver.nodes[0].first = solver.nodes[1].suspended;
+                solver.nodes[0].price = rc;
+                solver.cut_on = cut_on;
+                assert_eq!(solver.price_in(), Ok(0));
+                let active = solver.nodes[0].first == solver.nodes[0].suspended;
+                assert_eq!(
+                    active,
+                    (rc as f64).abs() < cut_on,
+                    "rc={rc}, cut_on={cut_on}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn price_in_schedule_matches_post_increment() {
+        for interval in [2, 4, 6] {
+            let mut counter = 0;
+            for _ in 0..2 {
+                for _ in 0..=interval {
+                    assert!(!price_in_due(&mut counter, interval));
+                }
+                assert!(price_in_due(&mut counter, interval));
+                assert_eq!(counter, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn price_refine_rank_is_exact_at_two_to_the_53() {
+        let mut solver = McmfCs2::new(2, 1);
+        solver.set_arc(1, 2, 0, 1, 0).expect("arc");
+        initialize(&mut solver);
+        solver.epsilon = 1_i64 << 53;
+        solver.nodes[0].price = -solver.epsilon;
+        assert_eq!(solver.price_refine(), Ok(true));
+        // |rc| == epsilon needs rank floor((epsilon - 1) / epsilon) == 0.
+        assert_eq!(solver.nodes[1].price, 0);
+    }
+
+    #[test]
+    fn epsilon_ceiling_is_exact_above_f64_integer_precision() {
+        let mut solver = McmfCs2::new(0, 0);
+        for epsilon in ((1_i64 << 53) - 20)..=((1_i64 << 53) + 20) {
+            solver.epsilon = epsilon;
+            assert!(!solver.update_epsilon());
+            assert_eq!(i128::from(solver.epsilon), (i128::from(epsilon) + 11) / 12);
+        }
+    }
+
+    #[test]
+    fn cycle_cancellation_uses_the_full_i64_capacity_range() {
+        let capacity = i64::from(i32::MAX) + 100;
+        let mut solver = McmfCs2::new(2, 2);
+        solver.set_arc(1, 2, 0, capacity, 0).expect("arc");
+        solver.set_arc(2, 1, 0, capacity + 10, 0).expect("arc");
+        initialize(&mut solver);
+        // Build a residual negative cycle after initialization, to exercise
+        // price_refine's bottleneck computation rather than initial saturation.
+        for (a, &cap) in solver.arcs.iter_mut().zip(&solver.cap) {
+            a.cost = if cap > 0 { -1 } else { 1 };
+        }
+        solver.epsilon = 1;
+        assert_eq!(solver.price_refine(), Ok(false));
+        for (a, &cap) in solver.arcs.iter().zip(&solver.cap) {
+            if cap > 0 {
+                assert_eq!(a.res_capacity, cap - capacity);
+            }
+        }
+    }
+
+    #[test]
+    fn reduced_cost_and_later_price_updates_report_overflow() {
+        assert_eq!(reduced_cost(i64::MAX, 1, 0), Err(Cs2Error::PriceOverflow));
+        assert_eq!(reduced_cost(i64::MIN, 0, 1), Err(Cs2Error::PriceOverflow));
+        assert_eq!(reduced_cost(-10, 3, -8), Ok(1));
+        let mut solver = McmfCs2::new(1, 0);
+        initialize(&mut solver);
+        solver.nodes[0].rank = 2;
+        solver.epsilon = i64::MAX;
+        assert_eq!(
+            solver.up_node_scan(solver.nodes_base),
+            Err(Cs2Error::PriceOverflow)
+        );
+        solver.nodes[0].rank = 1;
+        solver.nodes[0].price = i64::MIN;
+        solver.epsilon = 1;
+        assert_eq!(
+            solver.up_node_scan(solver.nodes_base),
+            Err(Cs2Error::PriceOverflow)
+        );
+    }
+
+    #[test]
+    fn feasibility_check_is_repeatable_with_lower_bounds() {
+        let input = "p min 2 1\nn 1 10\nn 2 -10\na 1 2 3 10 2\n";
+        let initial_balances = [7, -7]; // Supply adjusted by the lower bound of 3.
+        let solution = McmfCs2::from_dimacs(input)
+            .expect("input")
+            .check_solution(true)
+            .min_cost()
+            .expect("solution");
+        assert!(solution.solver.is_feasible(&initial_balances));
+        assert!(solution.solver.is_feasible(&initial_balances));
+        assert_eq!(initial_balances, [7, -7]);
+    }
+
+    #[test]
+    fn feasibility_check_needs_pre_solve_balances_not_final_excess() {
+        let input = "p min 2 1\nn 1 1\nn 2 -1\na 1 2 0 1 7\n";
+        let solution = McmfCs2::from_dimacs(input)
+            .expect("input")
+            .check_solution(true)
+            .min_cost()
+            .expect("solution");
+        let solver = &solution.solver;
+        let final_excess: Vec<_> = solver.nodes[..solver.n]
+            .iter()
+            .map(|node| node.excess)
+            .collect();
+        assert_eq!(final_excess, [0, 0]);
+        assert!(solver.is_feasible(&[1, -1]));
+        assert!(!solver.is_feasible(&final_excess));
+    }
 
     #[test]
     fn price_in_restart_uses_widened_cut_on() {
@@ -2810,7 +3096,7 @@ mod tests {
         solver.set_arc(1, 3, 0, 1, 5).expect("second arc");
         solver.pre_processing().expect("preprocessing");
         solver.m *= 2;
-        solver.cs2_initialize();
+        solver.cs2_initialize().expect("initialization");
 
         // Costs are now 4 and 20. Suspend both arcs from node 1, and
         // make the first arc admissible so price_in must restart.
@@ -2822,7 +3108,7 @@ mod tests {
         solver.cut_on = CUT_OFF_MIN * CUT_OFF_GAP;
         solver.n_bad_pricein = 1;
 
-        assert_eq!(solver.price_in(), 1);
+        assert_eq!(solver.price_in().expect("price-in"), 1);
         // The cost-20 arc is outside the old threshold (9.6), but inside
         // the widened threshold (38.4), so both arcs must now be active.
         assert_eq!(solver.nodes[0].first, solver.nodes[0].suspended);

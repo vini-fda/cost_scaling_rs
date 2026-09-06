@@ -217,4 +217,4 @@ jobs:
           TARGET_UPPERCASE=$(echo ${{ matrix.host_target }} | tr '[:lower:]-' '[:upper:]_')
           echo "CARGO_TARGET_${TARGET_UPPERCASE}_LINKER=${{ matrix.gcc_cross }}-gcc" | tee -a $GITHUB_ENV
       - name: Run soundness tests under miri
-        run: cargo miri test --test miri_soundness
+        run: cargo miri test --lib --test miri_soundness --test correctness_regressions

@@ -1,6 +1,6 @@
 [package]
 name = "cost-scaling-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Vinícius Freitas de Almeida <vinifreitas.d.a@gmail.com>"]
 description = "CS2 minimum-cost maximum-flow algorithm (cost-scaling successive approximation)"
