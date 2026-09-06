@@ -28,6 +28,11 @@ clean:
 
 ci: fmt-check clippy test
 
+# Generate GOTO/NETGEN Typst sources and render light/dark PNGs (requires typst).
+problem-diagrams dir='target/diagrams':
+  cargo run --example gen_diagrams -- "{{dir}}"
+  bash diagrams/render_problems.sh "{{dir}}"
+
 # Run the miri soundness suite under both aliasing models.
 # Requires the `miri` component on a nightly toolchain:
 #   rustup +nightly component add miri

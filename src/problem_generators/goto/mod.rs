@@ -24,6 +24,9 @@ use std::fs::File;
 use std::io::{self, BufWriter};
 use std::path::Path;
 
+mod diagram;
+pub use diagram::write_typst;
+
 const B: i64 = 13_415_821;
 const MOD: i64 = 100_000_000;
 const MOD1: i64 = 10_000;

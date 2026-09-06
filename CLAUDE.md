@@ -29,12 +29,14 @@ As of the `perf/raw-pointer-arenas-v2` branch, the Rust implementation **matches
 - `src/problem_generators/` - Graph problem generators.
   - `goto/` - GOTO (Grid On TOrus) problem generator in DIMACS format.
   - `netgen/` - NETGEN assignment, transportation, and network flow problem generator.
+  - `typst/` - Shared Typst diagram export, matching the theme in `diagrams/sample.typ`.
 - `src/parser.rs` - Parser for DIMACS minimum-cost flow (`.min`) files.
 - `src/main.rs` - Binary entry point.
 - `tests/` - Integration tests, comparing the Rust implementation to the C implementation.
   - `testdata/` - Sample test data.
 - `benches/` - Criterion benchmarks.
 - `examples/gen_goto.rs` - GOTO problem generator CLI.
+- `examples/gen_diagrams.rs` - GOTO/NETGEN diagram samples; render with `just problem-diagrams`.
 - `docs/` - Documentation.
 
 # Context and how to work on this repo

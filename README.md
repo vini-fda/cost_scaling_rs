@@ -138,6 +138,50 @@ f <tail> <head> <flow>
 ...
 ```
 
+## Problem diagrams
+
+GOTO and NETGEN can export standalone Typst/Fletcher diagrams using the exact
+fonts, colors, gradients, supply/demand circles, and transparent background from
+[`diagrams/sample.typ`](diagrams/sample.typ).
+
+Generate sample instances and render both themes, including detailed arc pages:
+
+```bash
+just problem-diagrams
+```
+
+This requires the `typst` CLI (tested with 0.15.1) and Fletcher 0.5.8, which Typst
+downloads on first use. Outputs go to `target/diagrams/`: GOTO, NETGEN minimum-cost
+flow, NETGEN maximum flow, and NETGEN assignment, each with light/dark PNGs and
+the corresponding `.typ` and DIMACS files. An optional directory can be supplied
+with `just problem-diagrams path/to/output`.
+
+To generate only the sources, or compile a particular view:
+
+```bash
+cargo run --example gen_diagrams
+typst compile target/diagrams/goto.typ target/diagrams/goto-light.png --ppi 144
+typst compile target/diagrams/goto.typ target/diagrams/goto-dark.png --ppi 144 --input theme=dark
+typst compile target/diagrams/goto.typ 'target/diagrams/goto-detail-{p}.png' --input view=details
+```
+
+For custom instances, call `problem_generators::goto::write_typst(&params, &mut writer)`
+or `problem_generators::netgen::write_typst(&instance, &mut writer)` with any
+`std::io::Write` destination. The Rust library writes the source without invoking
+Typst or adding runtime dependencies.
+
+GOTO uses its original grid coordinates (x increases rightward, y downward),
+with four disjoint overview diagrams for horizontal, vertical, cross-grid, and
+return-path arcs. NETGEN places sources at left, transshipment nodes in the
+middle, and sinks at right. Detail pages show at most 12 labeled arcs and an
+exact table of their values; parallel arcs retain their original IDs. NETGEN
+labels follow each problem kind: capacity bounds and cost for minimum-cost
+flow, capacity for maximum flow, and cost for assignment.
+
+Exports are limited to 128 nodes and 2,048 arcs for explanatory diagrams;
+larger or inconsistent instances return `DiagramError` instead of being sampled.
+Dark PNGs retain transparency and are intended for a dark background.
+
 ## Testing
 
 The test suite validates the Rust implementation against the original C reference (included in `cs2/`):
@@ -201,6 +245,7 @@ src/
     mod.rs    - Graph problem generator module
     goto/     - GOTO (Grid On Torus) test problem generator
     netgen/   - NETGEN assignment, transportation, and network flow generator
+    typst/    - Shared Typst diagram writer and sample-matching theme
 cs2/          - Reference C implementation (Goldberg, IG Systems)
 testdata/     - Static DIMACS test inputs
 tests/        - Integration tests (Rust vs. C comparison)
