@@ -1,4 +1,4 @@
-//! Counterexamples from the correctness audit, checked independently of C.
+//! Many counterexamples and edge cases to verify correctness.
 
 #![allow(clippy::float_cmp)]
 
