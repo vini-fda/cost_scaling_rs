@@ -4,7 +4,7 @@
 //! are compared. The C binary is compiled automatically if missing.
 
 use cost_scaling_rs::McmfCs2;
-use cost_scaling_rs::goto::{self, GotoParams};
+use cost_scaling_rs::problem_generators::goto::{self, GotoParams};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::PathBuf;

@@ -21,7 +21,7 @@
 //! cargo run --release --example gen_netgen < problems.40 > out.dimacs
 //! ```
 
-use cost_scaling_rs::netgen::{NetgenParams, generate, write_dimacs};
+use cost_scaling_rs::problem_generators::netgen::{NetgenParams, generate, write_dimacs};
 use std::io::{self, BufWriter, Read};
 use std::str::SplitAsciiWhitespace;
 

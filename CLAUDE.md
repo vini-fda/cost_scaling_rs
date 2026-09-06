@@ -26,7 +26,9 @@ As of the `perf/raw-pointer-arenas-v2` branch, the Rust implementation **matches
 # Project Structure
 - `cs2/` - Reference C implementation, with very few adjustments to make it compile under modern C standards.
 - `src/lib.rs` - The entire min-cost max-flow algorithm is here.
-- `src/goto.rs` - GOTO (Grid On TOrus) problem generator in DIMACS format.
+- `src/problem_generators/` - Graph problem generators.
+  - `goto/` - GOTO (Grid On TOrus) problem generator in DIMACS format.
+  - `netgen/` - NETGEN assignment, transportation, and network flow problem generator.
 - `src/parser.rs` - Parser for DIMACS minimum-cost flow (`.min`) files.
 - `src/main.rs` - Binary entry point.
 - `tests/` - Integration tests, comparing the Rust implementation to the C implementation.

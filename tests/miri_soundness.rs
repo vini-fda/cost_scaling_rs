@@ -1,7 +1,7 @@
 //! Soundness tests for the unsafe pointer-based `McmfCs2` implementation.
 
 use cost_scaling_rs::McmfCs2;
-use cost_scaling_rs::goto::{GotoParams, generate_to_string};
+use cost_scaling_rs::problem_generators::goto::{GotoParams, generate_to_string};
 
 /// 6-node sample matching `testdata/sample.inp`. Exercises the full
 /// refine + `price_refine` + finishup pipeline.

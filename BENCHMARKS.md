@@ -29,7 +29,7 @@ Challenge (1990–1991) and remain available from its FTP archive:
 | GRIDGRAPH | Layered grid graphs | <ftp://dimacs.rutgers.edu/pub/netflow/generators/network/gridgraph/> |
 
 > The GOTO generator is already reimplemented in this repo
-> (`src/goto.rs`, CLI in `examples/gen_goto.rs`).
+> (`src/problem_generators/goto/mod.rs`, CLI in `examples/gen_goto.rs`).
 
 Index of the FTP tree: <ftp://dimacs.rutgers.edu/pub/netflow/>
 

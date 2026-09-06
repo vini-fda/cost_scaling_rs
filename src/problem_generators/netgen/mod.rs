@@ -16,7 +16,7 @@
 //! # Quick start
 //!
 //! ```no_run
-//! use cost_scaling_rs::netgen::{NetgenParams, generate, write_dimacs};
+//! use cost_scaling_rs::problem_generators::netgen::{NetgenParams, generate, write_dimacs};
 //! use std::io::stdout;
 //!
 //! let params = NetgenParams {

@@ -1,13 +1,13 @@
-//! GOTO (Grid On TOrus) generator
+//! GOTO (Grid On Torus) generator
 //!
 //! Produces a capacitated transportation problem in DIMACS `.min` format,
 //! laid out on a grid-on-torus. Originally by Andrew V. Goldberg (1991),
 //! Stanford University.
 //!
 //! The main functions for usage are:
-//! - [generate]
-//! - [generate_to_string]
-//! - [generate_to_file]
+//! - [`generate`]
+//! - [`generate_to_string`]
+//! - [`generate_to_file`]
 //!
 //! # Inputs
 //!
@@ -637,7 +637,7 @@ mod tests {
             max_cost: 10,
             seed: 42,
         });
-        let expected = include_str!("../testdata/case1.txt");
+        let expected = include_str!("../../../testdata/case1.txt");
         assert_eq!(output, expected);
     }
 
@@ -650,7 +650,7 @@ mod tests {
             max_cost: 16,
             seed: 99,
         });
-        let expected = include_str!("../testdata/case2.txt");
+        let expected = include_str!("../../../testdata/case2.txt");
         assert_eq!(output, expected);
     }
 
@@ -663,7 +663,7 @@ mod tests {
             max_cost: 100,
             seed: 7,
         });
-        let expected = include_str!("../testdata/case3.txt");
+        let expected = include_str!("../../../testdata/case3.txt");
         assert_eq!(output, expected);
     }
 

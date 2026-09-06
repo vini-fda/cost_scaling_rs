@@ -1,5 +1,5 @@
 use cost_scaling_rs::McmfCs2;
-use cost_scaling_rs::goto::{GotoParams, generate_to_string};
+use cost_scaling_rs::problem_generators::goto::{GotoParams, generate_to_string};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn goto_problem(n: i64) -> String {
