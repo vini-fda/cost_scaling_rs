@@ -444,8 +444,6 @@ pub struct McmfCs2 {
     no_zero_cycles: bool,
     /// Print the answer?
     print_ans: bool,
-    /// Per-node supply/demand balance.
-    node_balance: Vec<i64>,
 
     // -- sketch variables used during reading in arcs --
     /// Minimal node id.
@@ -653,7 +651,6 @@ impl McmfCs2 {
 
             no_zero_cycles: false,
             print_ans: true,
-            node_balance: Vec::new(),
 
             node_min: 0,
             node_max: 0,
@@ -2452,11 +2449,16 @@ impl McmfCs2 {
         false
     }
 
-    /// Check transformed balances against flow above each lower bound.
-    fn is_feasible(&self) -> bool {
+    /// Check pre-initialization transformed balances against flow above each lower bound.
+    ///
+    /// - initial_balances: Per-node supply/demand balance.
+    fn is_feasible(&self, initial_balances: &[Excess]) -> bool {
+        debug_assert_eq!(initial_balances.len(), self.n);
         // Wider scratch sums avoid overflow due only to the order of checking
-        // incident arcs. Do not mutate the saved balances: checking is repeatable.
-        let mut balance: Vec<i128> = self.node_balance.iter().copied().map(i128::from).collect();
+        // incident arcs.
+        // We do not mutate the saved balances so that checking is repeatable.
+        // Current node excesses are not a substitute: solving has changed them.
+        let mut balance: Vec<i128> = initial_balances.iter().copied().map(i128::from).collect();
         let arcs_base = self.arcs_base;
         let nodes_base = self.nodes_base;
         for i in 0..self.n {
@@ -2487,7 +2489,7 @@ impl McmfCs2 {
                 }
             }
         }
-        balance[..self.n].iter().all(|&excess| excess == 0)
+        balance.iter().all(|&excess| excess == 0)
     }
 
     /// Checks complimentary slackness.
@@ -2728,13 +2730,14 @@ impl McmfCs2 {
         let check_solution = self.check_solution;
         let comp_duals = self.comp_duals;
 
-        // check solution setup
-        if check_solution {
-            self.node_balance = vec![0i64; self.n + 1];
-            for i in 0..self.n {
-                self.node_balance[i] = self.nodes[i].excess;
-            }
-        }
+        // Save transformed supplies before initialization or pushes change excess.
+        // The snapshot is local to this solve, and is not allocated when checking is off.
+        let initial_balances = check_solution.then(|| {
+            self.nodes[..self.n]
+                .iter()
+                .map(|node| node.excess)
+                .collect::<Vec<_>>()
+        });
 
         // double the arc count (forward + backward)
         self.m *= 2;
@@ -2774,9 +2777,9 @@ impl McmfCs2 {
             self.n_prscan1, self.n_bad_pricein, self.n_bad_relabel
         );
 
-        if check_solution {
+        if let Some(initial_balances) = initial_balances {
             println!("c checking feasibility...");
-            if self.is_feasible() {
+            if self.is_feasible(&initial_balances) {
                 println!("c ...OK");
             } else {
                 println!("c ERROR: solution infeasible");
@@ -2815,13 +2818,14 @@ impl McmfCs2 {
 
         let check_solution = self.check_solution;
 
-        // check solution setup
-        if check_solution {
-            self.node_balance = vec![0i64; self.n + 1];
-            for i in 0..self.n {
-                self.node_balance[i] = self.nodes[i].excess;
-            }
-        }
+        // Save transformed supplies before initialization or pushes change excess.
+        // The snapshot is local to this solve, and is not allocated when checking is off.
+        let initial_balances = check_solution.then(|| {
+            self.nodes[..self.n]
+                .iter()
+                .map(|node| node.excess)
+                .collect::<Vec<_>>()
+        });
 
         // double the arc count (forward + backward)
         self.m *= 2;
@@ -2830,8 +2834,8 @@ impl McmfCs2 {
         let mut objective_cost = 0.0;
         self.cs2(&mut objective_cost)?;
 
-        if check_solution {
-            if !self.is_feasible() {
+        if let Some(initial_balances) = initial_balances {
+            if !self.is_feasible(&initial_balances) {
                 return Err(Cs2Error::Infeasible);
             }
             self.compute_prices()?;
@@ -3056,13 +3060,33 @@ mod tests {
     #[test]
     fn feasibility_check_is_repeatable_with_lower_bounds() {
         let input = "p min 2 1\nn 1 10\nn 2 -10\na 1 2 3 10 2\n";
+        let initial_balances = [7, -7]; // Supply adjusted by the lower bound of 3.
         let solution = McmfCs2::from_dimacs(input)
             .expect("input")
             .check_solution(true)
             .min_cost()
             .expect("solution");
-        assert!(solution.solver.is_feasible());
-        assert!(solution.solver.is_feasible());
+        assert!(solution.solver.is_feasible(&initial_balances));
+        assert!(solution.solver.is_feasible(&initial_balances));
+        assert_eq!(initial_balances, [7, -7]);
+    }
+
+    #[test]
+    fn feasibility_check_needs_pre_solve_balances_not_final_excess() {
+        let input = "p min 2 1\nn 1 1\nn 2 -1\na 1 2 0 1 7\n";
+        let solution = McmfCs2::from_dimacs(input)
+            .expect("input")
+            .check_solution(true)
+            .min_cost()
+            .expect("solution");
+        let solver = &solution.solver;
+        let final_excess: Vec<_> = solver.nodes[..solver.n]
+            .iter()
+            .map(|node| node.excess)
+            .collect();
+        assert_eq!(final_excess, [0, 0]);
+        assert!(solver.is_feasible(&[1, -1]));
+        assert!(!solver.is_feasible(&final_excess));
     }
 
     #[test]

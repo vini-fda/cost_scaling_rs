@@ -213,6 +213,27 @@ fn lower_bounds_work_with_and_without_checks_and_duals() {
 }
 
 #[test]
+fn checked_entry_points_capture_balances_before_initialization() {
+    // The second input changes excess during initial negative-arc saturation,
+    // before refine starts. Both entry points must already have their snapshots.
+    let negative = "p min 2 1\nn 1 1\nn 2 -1\na 1 2 0 2 -7\n";
+    for (input, expected_cost) in [(LOWER, 50.0), (negative, -7.0)] {
+        let solution = McmfCs2::from_dimacs(input)
+            .expect("input")
+            .check_solution(true)
+            .min_cost()
+            .expect("checked solution");
+        assert_eq!(solution.objective_cost, expected_cost);
+
+        McmfCs2::from_dimacs(input)
+            .expect("input")
+            .check_solution(true)
+            .run_cs2()
+            .expect("checked legacy entry point");
+    }
+}
+
+#[test]
 fn replacing_supply_updates_totals_including_sign_changes() {
     let mut solver = McmfCs2::new(2, 1);
     for supply in [1, 2, -3, 0, 2] {
